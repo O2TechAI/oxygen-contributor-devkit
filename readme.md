@@ -540,4 +540,4 @@ frozen prompts and validators; historical cards and annotations are not converte
 
 ## Founding team
 
-Zihan Wang / Zidi Xiong / Estelle Zhang / Bruce Tian / Yuxiang Lin / Andrew Zhou / Henry Sun / Manling Li
+Zihan Wang, Zidi Xiong, Estelle Zhang, Bruce Tian, Yuxiang Lin, Andrew Zhou, Henry Sun, Manling Li
