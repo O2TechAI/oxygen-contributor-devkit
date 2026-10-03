@@ -1,4 +1,25 @@
-# Oxygen Contributor Devkit
+<div align="center">
+
+<h1>
+  <img src="docs/assets/oxygen-logo.svg" alt="" width="43" valign="middle" />
+  &nbsp;oxygen-contributor-kit
+</h1>
+
+**Turn agent sessions into knowledge worth keeping.**
+
+[Quick start](#launch-the-complete-pipeline-from-codex) · [Review app](review-app/README.md) · [Contributors](#contributors)
+
+<img src="docs/assets/oxygen-hero.svg" alt="Oxygen turns user corrections and agent discoveries into readable summaries and reusable insights, with human review before reuse." width="100%" />
+
+</div>
+
+Long sessions contain more than completed tasks. They capture the corrections,
+discoveries, and decisions that make future work better. Oxygen turns those
+sessions into readable summaries and reusable skill candidates, with evidence
+links and a review interface for deciding what to keep, edit, or decline.
+
+---
+
 
 ## Launch the complete pipeline from Codex
 
@@ -519,5 +540,4 @@ frozen prompts and validators; historical cards and annotations are not converte
 
 ## Contributors
 
-- [Zihan Wang](https://github.com/ZihanWang314)
-- [Zidi Xiong](https://github.com/polaris-73)
+Zihan Wang / Zidi Xiong / Estelle Zhang / Bruce Tian / Yuxiang Lin / Andrew Zhou / Henry Sun / Manling Li
