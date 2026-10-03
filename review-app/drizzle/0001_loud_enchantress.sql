@@ -1,0 +1,1 @@
+CREATE INDEX `idx_reviews_status_updated` ON `reviews` (`status`,`updated_at`);

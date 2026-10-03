@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788470093147,
+      "tag": "0000_lethal_nighthawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788470124777,
+      "tag": "0001_loud_enchantress",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788816320042,
+      "tag": "0002_optimal_puck",
+      "breakpoints": true
+    }
+  ]
+}

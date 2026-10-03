@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oxygen Deterministic Trajectory Agents"
+  short_description: "Readable summaries with Python labels and fresh insights"
+  default_prompt: "Use $oxygen-deterministic-trajectory-agents to summarize the supplied trajectory or Markdown summary, label its lines, then run fresh insight and privacy-redaction agents."

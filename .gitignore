@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+/data/
+/tools/examples/
+/prompts/summary-and-insight-old.md

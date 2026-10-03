@@ -1,0 +1,3 @@
+ALTER TABLE `review_revisions` ADD `hierarchy_json` text DEFAULT '{"trajectorySummary":{"originalText":"","text":""},"summaryGroups":[]}' NOT NULL;--> statement-breakpoint
+ALTER TABLE `reviews` ADD `original_hierarchy_json` text DEFAULT '{"trajectorySummary":{"originalText":"","text":""},"summaryGroups":[]}' NOT NULL;--> statement-breakpoint
+ALTER TABLE `reviews` ADD `current_hierarchy_json` text DEFAULT '{"trajectorySummary":{"originalText":"","text":""},"summaryGroups":[]}' NOT NULL;
