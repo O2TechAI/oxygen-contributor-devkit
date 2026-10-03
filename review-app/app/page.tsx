@@ -5,6 +5,7 @@ import {
   type SyntheticEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -77,6 +78,7 @@ import {
   type SummaryLine,
 } from '@/lib/review-types';
 import { cn } from '@/lib/utils';
+import { Autosave } from '@/lib/autosave';
 import {
   classifySummaryLines,
   detectedInsightKeys,
@@ -153,7 +155,6 @@ export default function Home() {
   const [draftEvidence, setDraftEvidence] = useState('');
   const [changeNote, setChangeNote] = useState('');
   const [editorError, setEditorError] = useState('');
-  const [pendingNotes, setPendingNotes] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<
     'idle' | 'saving' | 'saved' | 'error'
@@ -166,6 +167,79 @@ export default function Home() {
   const [exportWarningOpen, setExportWarningOpen] = useState(false);
 
   const active = reviews.find((review) => review.id === activeId) ?? reviews[0];
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  const [autosave] = useState(
+    () =>
+      new Autosave<{ review: Review; note: string; status: Review['status'] }>(
+        async ({ review: snapshot, note, status }) => {
+          const response = await fetch(
+            `/api/reviews/${snapshot.id}/revisions`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                trajectorySummary: snapshot.trajectorySummary,
+                summaryGroups: snapshot.summaryGroups,
+                summaryLines: snapshot.summaryLines,
+                insights: snapshot.insights,
+                note,
+                status,
+              }),
+            },
+          );
+          if (!response.ok) {
+            const result = (await response.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            throw new Error(result?.error || 'Autosave failed. Please retry.');
+          }
+          const { review } = (await response.json()) as { review: Review };
+          // A response from an earlier edit must never overwrite newer local edits.
+          setReviews((current) =>
+            current.map((item) =>
+              item.id !== review.id
+                ? item
+                : item.insights === snapshot.insights &&
+                    item.summaryLines === snapshot.summaryLines &&
+                    item.summaryGroups === snapshot.summaryGroups &&
+                    item.trajectorySummary === snapshot.trajectorySummary
+                  ? review
+                  : { ...item, revisionCount: review.revisionCount },
+            ),
+          );
+        },
+        (state, error) => {
+          setDirty(state !== 'saved');
+          setSaveState(state === 'pending' ? 'idle' : state);
+          setSaveError(
+            error instanceof Error
+              ? error.message
+              : state === 'error'
+                ? 'Autosave failed.'
+                : '',
+          );
+        },
+      ),
+  );
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!autosave.hasPending) return;
+      event.preventDefault();
+    };
+    const flushOnHide = () => {
+      if (document.visibilityState === 'hidden') void autosave.flush();
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', flushOnHide);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', flushOnHide);
+    };
+  }, [autosave]);
   const skillCandidates = isSkillCandidateProtocol(
     active?.protocolVersion ?? 7,
   );
@@ -312,6 +386,7 @@ export default function Home() {
   }
 
   async function handleLogout() {
+    if (!(await autosave.flush())) return;
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
     setReviews([]);
     setExportIds([]);
@@ -322,7 +397,8 @@ export default function Home() {
     setAuthState('signed_out');
   }
 
-  function chooseReview(id: string) {
+  async function chooseReview(id: string) {
+    if (editorTarget || !(await autosave.flush())) return;
     const review = reviews.find((item) => item.id === id);
     if (!review) return;
     activateReview(review);
@@ -339,23 +415,20 @@ export default function Home() {
     url.searchParams.set('review', review.id);
     window.history.replaceState(null, '', url);
     setSelectedInsight(review.insights[0]?.id ?? '');
-    setPendingNotes([]);
     setDirty(false);
     setSaveState('idle');
     setSaveError('');
   }
 
   function updateActive(transform: (review: Review) => Review, note: string) {
-    if (!active) return;
-    setReviews((current) =>
-      current.map((review) =>
-        review.id === active.id ? transform(review) : review,
-      ),
+    const current = activeRef.current;
+    if (!current) return;
+    const next = transform(current);
+    activeRef.current = next;
+    setReviews((items) =>
+      items.map((item) => (item.id === next.id ? next : item)),
     );
-    setPendingNotes((current) => [...current, note]);
-    setDirty(true);
-    setSaveState('idle');
-    setSaveError('');
+    autosave.enqueue({ review: next, note, status: 'in_review' });
   }
 
   function resetDraft() {
@@ -774,13 +847,13 @@ export default function Home() {
     }, 0);
   }
 
-  function openBatchExport() {
+  async function openBatchExport() {
+    if (editorTarget || !(await autosave.flush())) return;
     setBatchExportOpen(true);
   }
 
-  function downloadActiveReview() {
-    if (!active || dirty || saveState === 'saving' || editorTarget !== null)
-      return;
+  async function downloadActiveReview() {
+    if (!active || editorTarget !== null || !(await autosave.flush())) return;
     const link = document.createElement('a');
     link.href = `/api/reviews/${active.id}/export`;
     link.download = '';
@@ -790,43 +863,16 @@ export default function Home() {
   }
 
   async function persist(status: Review['status']) {
-    if (!active) return;
-    setSaveState('saving');
-    setSaveError('');
-    try {
-      const response = await fetch(`/api/reviews/${active.id}/revisions`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          trajectorySummary: active.trajectorySummary,
-          summaryGroups: active.summaryGroups,
-          summaryLines: active.summaryLines,
-          insights: active.insights,
-          note:
-            pendingNotes.join('; ') ||
-            (status === 'completed'
-              ? 'Human review completed.'
-              : 'Review draft saved.'),
-          status,
-        }),
-      });
-      if (!response.ok) {
-        const result = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(result?.error || 'Save failed.');
-      }
-      const { review } = (await response.json()) as { review: Review };
-      setReviews((current) =>
-        current.map((item) => (item.id === review.id ? review : item)),
-      );
-      setPendingNotes([]);
-      setDirty(false);
-      setSaveState('saved');
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Save failed.');
-      setSaveState('error');
-    }
+    if (!activeRef.current) return;
+    autosave.enqueue({
+      review: activeRef.current,
+      note:
+        status === 'completed'
+          ? 'Human review completed.'
+          : 'Review autosaved.',
+      status,
+    });
+    await autosave.flush();
   }
 
   if (authState === 'checking') {
@@ -946,6 +992,7 @@ export default function Home() {
           </div>
           <select
             aria-label="Choose trajectory review"
+            disabled={editorTarget !== null}
             value={active.id}
             onChange={(event) => chooseReview(event.target.value)}
             title={labels.get(active.id)}
@@ -967,7 +1014,7 @@ export default function Home() {
           />
           <span
             className={cn(
-              'hidden max-w-64 truncate text-xs sm:inline',
+              'max-w-64 truncate text-xs',
               saveState === 'error'
                 ? 'text-destructive'
                 : 'text-muted-foreground',
@@ -975,28 +1022,29 @@ export default function Home() {
             title={saveError}
           >
             {saveState === 'saving'
-              ? 'Saving…'
+              ? 'Autosaving…'
               : saveState === 'saved'
-                ? `Saved · revision ${active.revisionCount}`
+                ? `Saved automatically · revision ${active.revisionCount}`
                 : saveState === 'error'
                   ? saveError || 'Could not save'
                   : dirty
-                    ? 'Unsaved changes'
+                    ? 'Autosave pending…'
                     : `Revision ${active.revisionCount}`}
           </span>
           <Button
             variant="ghost"
-            disabled={dirty || saveState === 'saving' || editorTarget !== null}
+            disabled={editorTarget !== null}
             title={
-              dirty || editorTarget
-                ? 'Apply and save your edits before exporting'
-                : 'Export the latest saved summary and insight decisions'
+              editorTarget
+                ? 'Apply or cancel your edit before exporting'
+                : 'Save pending changes automatically and export'
             }
             aria-label="Export reviewed artifacts"
-            onClick={() => {
+            onClick={async () => {
+              if (!(await autosave.flush())) return;
               if (exportLabelingSummary([active]).incompleteReviews > 0)
                 setExportWarningOpen(true);
-              else downloadActiveReview();
+              else await downloadActiveReview();
             }}
           >
             <Download data-icon="inline-start" />
@@ -1006,13 +1054,11 @@ export default function Home() {
             <List data-icon="inline-start" />
             Trajectories ({groupTrajectories(reviews).length})
           </Button>
-          <Button
-            variant="outline"
-            disabled={saveState === 'saving' || !dirty}
-            onClick={() => persist('in_review')}
-          >
-            Save
-          </Button>
+          {saveState === 'error' && dirty && (
+            <Button variant="outline" onClick={() => void autosave.flush()}>
+              Retry autosave
+            </Button>
+          )}
           <Button
             disabled={saveState === 'saving' || !completable}
             title={
@@ -1025,7 +1071,11 @@ export default function Home() {
             <Check data-icon="inline-start" />
             Complete
           </Button>
-          <Button variant="ghost" onClick={handleLogout}>
+          <Button
+            variant="ghost"
+            disabled={editorTarget !== null}
+            onClick={handleLogout}
+          >
             <LogOut data-icon="inline-start" />
             Sign out
           </Button>
@@ -1155,7 +1205,10 @@ export default function Home() {
           </ScrollArea>
         </section>
 
-        <section className="flex min-h-0 min-w-0 flex-col" aria-labelledby="insights-heading">
+        <section
+          className="flex min-h-0 min-w-0 flex-col"
+          aria-labelledby="insights-heading"
+        >
           <div className="flex h-14 shrink-0 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
             <div className="flex items-center gap-2">
               <Lightbulb className="size-4 text-muted-foreground" />

@@ -28,7 +28,7 @@ separate proposed, attempted, reported, and observed outcomes in examples.
 ### Add a missing insight
 
 Choose **Add insight**, paste one Markdown card, **Preview card**, add it, decide,
-and **Save**. Reviewer-added cards remain editable in the same Markdown input.
+and wait for automatic saving. Reviewer-added cards remain editable in the same Markdown input.
 **Copy chatbot prompt** and **Open prompt** select drafting guidance for the
 active review's protocol. New reviews use the [skill-candidate prompt](public/reviewer-insight-prompt.md).
 
@@ -100,7 +100,7 @@ The Sites configuration leaves `project_id` unset while retaining the logical
 does not require a hosted project. The all-zero D1 ID in local configuration is
 a placeholder, not a remote database identifier.
 
-Choose **Apply edit**, then **Save**, and wait for the saved confirmation before
+Choose **Apply edit** and wait for **Saved automatically** before
 closing or refreshing the browser. Reopening loads the latest saved content,
 decisions, and deletions from the database. Unsaved edits and checkbox selections
 are browser-session state. Export bundles are outputs, not database backups or
@@ -112,8 +112,7 @@ You can also choose **Import review** in the app and select a prepared run JSON
 payload (such as `trajectory-001-redaction.json` from a completed run's
 `review-imports` directory). The app shows the project, source, protocol, stage,
 and card count after checking the manifest hashes, fields, and citations. Choose
-**Import and open review** to create a separate review. Save any pending edits
-before importing. Existing reviews and annotations are preserved.
+**Import and open review** to create a separate review. Wait for automatic saving before importing. Existing reviews and annotations are preserved.
 
 This accepts the same payload as `POST /api/reviews`, including v9's Description,
 Workflow, and Example. Preserve the `protocolVersion` recorded in the run
@@ -168,8 +167,12 @@ Scope/Takeaway cards. The database stores these formats in its existing JSON col
 - Completion requires a redacted input and an accepted or rejected decision
   for every Insight. Empty Insight output is valid.
 
-After editing, choose **Apply edit**, accept or decline the cards, then **Save**
-and **Export**. Export is disabled while edits are unsaved or an editor is open.
+After editing, choose **Apply edit**; decisions, applied edits, and deletions save
+automatically after a short pause. **Export** waits for pending saves, including
+edits made while a save is in flight. Failed saves retain local changes and show
+**Retry autosave**; export and switching reviews wait for a successful save.
+Apply or cancel an open editor before exporting. Closing or refreshing with a
+pending save shows a browser warning. Unapplied editor drafts are not autosaved.
 Original/unredacted reviews and drafts can be exported without completing them.
 Open **Trajectories** for one row per trajectory, with its original and redacted
 versions, review status, and accepted/declined/pending counts. Search or filter by
@@ -177,8 +180,8 @@ run, version, and review status. On initial load, redacted versions from the
 current run are selected by default, including unfinished reviews. Original
 versions start unchecked and can be selected manually. Use **Select all filtered**, **Select all in
 current run**, or individual checkboxes; **View selected** shows the full selection.
-Selections remain checked while you open and edit individual reviews. Apply and
-save edits before opening another review from the panel or exporting.
+Selections remain checked while you open and edit individual reviews. Apply editor changes before opening another review or exporting; pending saves
+are flushed automatically.
 The version filter offers **All versions**, **Original**, and **Redacted**;
 All versions includes only those two versions. The run filter lists individual
 runs. **View selected** shows checked versions across runs and temporarily

@@ -7,7 +7,7 @@
 
 **Turn agent sessions into knowledge worth keeping.**
 
-[Quick start](#launch-the-complete-pipeline-from-codex) · [Review app](review-app/README.md) · [Contributors](#contributors)
+[Quick start](#launch-the-complete-pipeline-from-codex) · [Review app](review-app/README.md) · [Founding team](#founding-team)
 
 <img src="docs/assets/oxygen-hero.svg" alt="Oxygen turns user corrections and agent discoveries into readable summaries and reusable insights, with human review before reuse." width="100%" />
 
@@ -416,7 +416,7 @@ attempted, reported, and observed outcomes in examples.
 ### Add a missing insight
 
 Choose **Add insight**, paste a complete Markdown card, select **Preview card**,
-then add it, decide, and **Save**. **Copy chatbot prompt** provides drafting guidance
+then add it, decide, and wait for automatic saving. **Copy chatbot prompt** provides drafting guidance
 for the active review's schema. The [v9 drafting prompt](review-app/public/reviewer-insight-prompt.md)
 uses source excerpts and your thoughts to propose one reusable skill candidate.
 
@@ -538,6 +538,6 @@ unindented single-word labels outside code delimit fields. Existing runs retain
 frozen prompts and validators; historical cards and annotations are not converted.
 
 
-## Contributors
+## Founding team
 
 Zihan Wang / Zidi Xiong / Estelle Zhang / Bruce Tian / Yuxiang Lin / Andrew Zhou / Henry Sun / Manling Li
