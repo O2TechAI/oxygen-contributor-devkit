@@ -916,7 +916,7 @@ export default function Home() {
   ).length;
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="min-h-screen bg-background text-foreground lg:flex lg:h-dvh lg:min-h-0 lg:flex-col lg:overflow-hidden">
       <TrajectoryPanel
         reviews={reviews}
         active={active}
@@ -933,8 +933,8 @@ export default function Home() {
         onOpenChange={setExportWarningOpen}
         onConfirm={downloadActiveReview}
       />
-      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-6">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
+      <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
             <Sparkles className="size-4" />
           </span>
@@ -949,7 +949,7 @@ export default function Home() {
             value={active.id}
             onChange={(event) => chooseReview(event.target.value)}
             title={labels.get(active.id)}
-            className="h-9 max-w-[min(90vw,40rem)] rounded-md border bg-background px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-9 w-full min-w-0 flex-1 basis-48 truncate rounded-md border bg-background px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {reviews.map((review) => (
               <option key={review.id} value={review.id}>
@@ -960,7 +960,7 @@ export default function Home() {
           <Badge variant="secondary">{reviewStatusLabel(active.status)}</Badge>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <ImportReview
             disabled={dirty || saveState === 'saving' || editorTarget !== null}
             onImported={openImportedReview}
@@ -1032,7 +1032,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="border-b px-4 py-3 text-sm sm:px-6">
+      <div className="shrink-0 border-b px-4 py-2 text-sm sm:px-6">
         <p className="font-medium">
           Would this insight help you with future work on this project or
           another?
@@ -1054,7 +1054,7 @@ export default function Home() {
         </p>
       </div>
       {active.format === 'v5' && (
-        <section className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b bg-muted/25 px-4 py-3 text-xs sm:px-6">
+        <section className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b bg-muted/25 px-4 py-3 text-xs sm:px-6">
           <span className="font-semibold">
             Protocol v{active.protocolVersion}
           </span>
@@ -1102,12 +1102,12 @@ export default function Home() {
         </section>
       )}
 
-      <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(390px,.85fr)]">
+      <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
         <section
-          className="min-w-0 border-b xl:border-b-0 xl:border-r"
+          className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
           aria-labelledby="summary-heading"
         >
-          <div className="flex h-14 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-muted-foreground" />
               <h1 id="summary-heading" className="font-semibold">
@@ -1124,7 +1124,7 @@ export default function Home() {
               Add line
             </Button>
           </div>
-          <ScrollArea className="h-[560px] xl:h-[calc(100vh-10.5rem)]">
+          <ScrollArea className="h-[min(560px,60dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
             {active.format === 'v5' ? (
               <div className="mx-auto max-w-4xl px-3 py-6 sm:px-7">
                 {active.summaryLines.length ? (
@@ -1155,8 +1155,8 @@ export default function Home() {
           </ScrollArea>
         </section>
 
-        <section className="min-w-0" aria-labelledby="insights-heading">
-          <div className="flex h-14 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
+        <section className="flex min-h-0 min-w-0 flex-col" aria-labelledby="insights-heading">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
             <div className="flex items-center gap-2">
               <Lightbulb className="size-4 text-muted-foreground" />
               <h2 id="insights-heading" className="font-semibold">
@@ -1173,7 +1173,7 @@ export default function Home() {
               Add insight
             </Button>
           </div>
-          <ScrollArea className="h-[620px] xl:h-[calc(100vh-10.5rem)]">
+          <ScrollArea className="h-[min(620px,65dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
             {active.insights.length ? (
               <div className="space-y-3 p-4 sm:p-5">
                 {active.insights.map((insight) => (
