@@ -2,7 +2,7 @@
 
 <h1>
   <img src="docs/assets/oxygen-logo.svg" alt="" width="43" valign="middle" />
-  &nbsp;oxygen-contributor-kit
+  &nbsp;Oxygen Contributor Devkit
 </h1>
 
 **Turn agent sessions into knowledge worth keeping.**
