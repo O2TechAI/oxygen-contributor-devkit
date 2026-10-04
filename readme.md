@@ -9,7 +9,7 @@
 
 [Quick start](#launch-the-complete-pipeline-from-codex) · [Review app](review-app/README.md) · [Founding team](#founding-team)
 
-<img src="docs/assets/oxygen-hero.svg" alt="Oxygen turns user corrections and agent discoveries into readable summaries and reusable insights, with human review before reuse." width="100%" />
+<img src="docs/assets/oxygen-hero.svg" alt="Animated diagram of one agent session: you tell the agent “Don’t just retry the test. Find out why CI fails,” and the agent discovers “The code was fine. CI runs in UTC.” Oxygen turns a forgotten lesson into a reusable one: a summary (“Why CI failed: timezone, not code.”) and a reusable skill (“Tests fail only in CI? Before changing code, check the timezone.”), which a person reviews with Keep, Edit, Decline or Export." width="100%" />
 
 </div>
 
