@@ -93,6 +93,44 @@ class TrajectoryAgentsTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(first, {"model": "gpt-6.1-sol", "reasoning_effort": "high", "fork_turns": "none"})
 
+    def test_claude_host_is_saved_and_used_for_every_stage(self):
+        RUN.prepare(self.source, host="claude")
+        manifest = json.loads((self.run / "manifest.json").read_bytes())
+        self.assertEqual(manifest["configuration"]["host"], "claude")
+        self.assertEqual(manifest["configuration"]["model"], "opus")
+        args = RUN.issue_call(self.source, "summary")
+        prompt = args.pop("prompt")
+        self.assertTrue(args.pop("description").startswith("Oxygen summary "))
+        self.assertEqual(args, {"subagent_type": "general-purpose", "model": "opus", "run_in_background": True})
+        self.assertIn("Claude Code Agent-tool worker", prompt)
+        self.assertNotIn("exec_command", prompt)
+        self.assertIn((RUN.KIT / "prompts" / "summary.md").read_text(), prompt)
+        self.write_summary()
+        self.accept(self.source, "summary")
+        self.assertIn("prompt", RUN.issue_call(self.source, "insight"))
+
+    def test_codex_host_notes_keep_exec_limits_and_model_is_fixed(self):
+        self.assertIn(b"`functions.exec` output limits", RUN.fixed_template("summary"))
+        with self.assertRaisesRegex(RUN.RunError, "codex_host_model_is_fixed"):
+            RUN.prepare(self.source, model="opus")
+        other = self.root / "other.jsonl"
+        other.write_bytes(self.original)
+        RUN.prepare(other, host="claude", model="sonnet")
+        self.assertEqual(RUN.issue_call(other, "summary")["model"], "sonnet")
+
+    def test_host_flag_only_applies_when_preparing(self):
+        with patch("sys.stdout"):
+            self.assertEqual(RUN.main(["prepare", str(self.source), "--host", "claude"]), 0)
+        with self.assertRaises(SystemExit), patch("sys.stderr"):
+            RUN.main(["summary-call", str(self.source), "--host", "codex"])
+
+    def test_live_claude_storage_must_be_collected_first(self):
+        live = self.root / ".claude" / "projects" / "-work" / "s.jsonl"
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.original)
+        with self.assertRaisesRegex(RUN.RunError, "collect_live_rollout_first"):
+            RUN.prepare(live, host="claude")
+
     def test_repository_prompts_are_embedded_verbatim(self):
         for stage, (name, _) in RUN.STAGES.items():
             self.assertIn((RUN.KIT / "prompts" / name).read_bytes(), RUN.fixed_template(stage))

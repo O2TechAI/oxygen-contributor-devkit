@@ -17,6 +17,25 @@ SKILL = Path(__file__).resolve().parents[1]
 KIT = SKILL.parents[1]
 MODEL = "gpt-6.1-sol"
 EFFORT = "high"
+HOSTS = ("codex", "claude")
+CLAUDE_MODEL = "opus"
+CLAUDE_SUBAGENT = "general-purpose"
+# Reading guidance differs by host because the file tools and their limits differ.
+HOST_NOTES = {
+    "codex": (
+        "Host: Codex `collaboration.spawn_agent` worker. Plan reads that fit both "
+        "`exec_command` and the enclosing `functions.exec` output limits."
+    ),
+    "claude": (
+        "Host: Claude Code Agent-tool worker with a fresh context. Read the source with "
+        "the Read tool using `offset` and `limit`. Each call returns at most 2000 lines and "
+        "may truncate very long lines or reject a range that is too large; request fewer "
+        "lines, or reread a long line with Bash (for example `sed -n 'Np' FILE | cut -c A-B`). "
+        "Write output files with Write or Edit, then set mode 0600 with `chmod 600` in Bash. "
+        "Run the label helper with Bash. Do not use the Agent, WebFetch, or WebSearch tools. "
+        "Your final message is the task result returned to the parent."
+    ),
+}
 PROTOCOL_VERSION = 9
 STAGES = {
     "summary": ("summary.md", ("summary.md", "summary_labeled.md")),
@@ -75,8 +94,9 @@ def paths(value):
     return source, Path(str(source) + ".oxygen-agents")
 
 
-def fixed_template(stage, label_script=LABEL_SCRIPT):
-    wrapper = (SKILL / "references" / f"{stage}-worker.md").read_bytes()
+def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex"):
+    notes = b"# Host notes\n\n" + HOST_NOTES[host].encode() + b"\n\n"
+    wrapper = notes + (SKILL / "references" / f"{stage}-worker.md").read_bytes()
     prompt = (KIT / "prompts" / STAGES[stage][0]).read_bytes()
     # Preserve the exact prompt file inside the message, including its final newline.
     helper = b""
@@ -86,28 +106,51 @@ def fixed_template(stage, label_script=LABEL_SCRIPT):
     return wrapper + b"\n" + prompt + helper + b"\n\n# Per-item input (JSON data)\n"
 
 
-def configuration():
+def host_settings(host="codex", model=None):
+    if host == "codex":
+        if model not in {None, MODEL}:
+            raise RunError("codex_host_model_is_fixed")
+        return {"tool": "collaboration.spawn_agent",
+                "model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none"}
+    if host == "claude":
+        # Agent-tool workers start from a fresh context unless a fork is requested;
+        # reasoning effort is inherited from the worker definition, not set per call.
+        return {"host": "claude", "tool": "Agent", "subagent_type": CLAUDE_SUBAGENT,
+                "model": model or CLAUDE_MODEL, "run_in_background": True,
+                "context": "fresh"}
+    raise RunError("unsupported_worker_host")
+
+
+def configuration(host="codex", model=None):
     return {
         "protocol_version": PROTOCOL_VERSION,
-        "tool": "collaboration.spawn_agent",
-        "model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none",
+        **host_settings(host, model),
         "helper_sha256": sha(Path(__file__).read_bytes()),
         "labeler_sha256": sha(LABEL_SCRIPT.read_bytes()),
         "card_parser_sha256": sha(CARD_SCRIPT.read_bytes()),
         "card_format_sha256": sha(CARD_FORMAT.read_bytes()),
-        "template_sha256": {stage: sha(fixed_template(stage)) for stage in STAGES},
+        "template_sha256": {stage: sha(fixed_template(stage, host=host)) for stage in STAGES},
         "prompt_sha256": {stage: sha((KIT / "prompts" / STAGES[stage][0]).read_bytes()) for stage in STAGES},
         "tools_and_sandbox": "inherited from the host; not independently configurable by this tool",
     }
 
 
 def call_arguments(stage, source, *, config=None, template=None):
-    config = config or {"model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none"}
+    config = config or host_settings()
+    host = config.get("host", "codex")
+    tag = sha(os.fsencode(str(source)))[:16]
+    message = (fixed_template(stage, host=host) if template is None else template).decode("utf-8") \
+        + json.dumps({"input_path": str(source)}, ensure_ascii=True, sort_keys=True) + "\n"
+    if host == "claude":
+        return {
+            "description": f"Oxygen {stage} {tag[:8]}",
+            **{key: config[key] for key in ("subagent_type", "model", "run_in_background")},
+            "prompt": message,
+        }
     return {
-        "task_name": f"oxygen_{stage}_{sha(os.fsencode(str(source)))[:16]}",
+        "task_name": f"oxygen_{stage}_{tag}",
         **{key: config[key] for key in ("fork_turns", "model", "reasoning_effort")},
-        "message": (fixed_template(stage) if template is None else template).decode("utf-8")
-        + json.dumps({"input_path": str(source)}, ensure_ascii=True, sort_keys=True) + "\n",
+        "message": message,
     }
 
 
@@ -136,12 +179,19 @@ def save_manifest(run, manifest):
         temporary.unlink(missing_ok=True)
 
 
-def prepare(value):
+def live_session_storage(source):
+    parts = source.parts
+    if ".codex" in parts and any(part in parts for part in ("sessions", "archived_sessions")):
+        return True
+    return "projects" in parts and any(part.startswith(".claude") for part in parts)
+
+
+def prepare(value, *, host="codex", model=None):
     source, run = paths(value)
     if source.suffix.lower() not in {".json", ".jsonl", ".md"}:
         raise RunError("expected_json_jsonl_or_markdown")
     # Live rollouts must first be frozen by the collector; no analysis under live storage.
-    if ".codex" in source.parts and any(part in source.parts for part in ("sessions", "archived_sessions")):
+    if live_session_storage(source):
         raise RunError("collect_live_rollout_first")
     data = read_regular(source)
     if not data.strip():
@@ -156,7 +206,7 @@ def prepare(value):
             data.decode("utf-8")
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise RunError("malformed_input") from exc
-    config = configuration()
+    config = configuration(host, model)
     run.mkdir(mode=0o700)
     run.chmod(0o700)
     for stage in STAGES:
@@ -172,7 +222,7 @@ def prepare(value):
     protocol.chmod(0o700)
     snapshots = {"label_summary_lines.py": LABEL_SCRIPT.read_bytes(),
                  "insight_cards.py": CARD_SCRIPT.read_bytes()}
-    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name)
+    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host)
                       for stage in STAGES})
     for name, content in snapshots.items():
         write_new(protocol / name, content)
@@ -255,7 +305,7 @@ def prepare_summary_labels(run):
     labeler.label_file(directory / "summary.md", directory / "summary_labeled.md")
 
 
-def prepare_insight(value, previous_run):
+def prepare_insight(value, previous_run, *, host="codex", model=None):
     """Start a new run from a verified accepted summary, without a summary worker."""
     source, run = paths(value)
     prior = Path(previous_run).expanduser()
@@ -291,7 +341,7 @@ def prepare_insight(value, previous_run):
     if source.exists() or run.exists():
         raise RunError("import_destination_already_exists")
     write_new(source, frozen)
-    result = prepare(source)
+    result = prepare(source, host=host, model=model)
     for name, data in summary.items():
         write_new(run / "summary" / name, data)
     manifest = load_run(source, run)
@@ -405,7 +455,7 @@ def accept(value, stage, *, worker_id=None, worker_status=None):
     return locked(value, finish)
 
 
-async def orchestrate(value, dispatch, wait, *, redact=True):
+async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model=None):
     """Dispatch -> await terminal result -> validate -> advance, using host adapters.
 
     dispatch(arguments) must asynchronously return the actual worker ID.
@@ -417,7 +467,7 @@ async def orchestrate(value, dispatch, wait, *, redact=True):
     if run.exists():
         verify_resume(source)
     else:
-        prepare(source)
+        prepare(source, host=host, model=model)
     stages = list(STAGES) if redact else ["summary", "insight"]
     for stage in stages:
         state = load_run(source, run)["stages"].get(stage, {})
@@ -447,7 +497,16 @@ def main(argv=None):
     parser.add_argument("--stage", choices=STAGES, help="Stage for record-worker")
     parser.add_argument("--worker-id", help="Actual host worker ID; required for record-worker and accept-*")
     parser.add_argument("--worker-status", choices=("complete", "error"), help="Task result observed after worker termination; required for accept-*")
+    parser.add_argument("--host", choices=HOSTS, help="Worker host for prepare/prepare-insight; saved in the run. "
+                        "Defaults to OXYGEN_WORKER_HOST or codex")
+    parser.add_argument("--model", help="Claude host only: Agent-tool model alias (default opus)")
     args = parser.parse_args(argv)
+    preparing = args.action in {"prepare", "prepare-insight"}
+    if (args.host or args.model) and not preparing:
+        parser.error("--host and --model apply only to prepare and prepare-insight; runs keep their saved host")
+    host = args.host or os.environ.get("OXYGEN_WORKER_HOST") or "codex"
+    if host not in HOSTS:
+        parser.error("OXYGEN_WORKER_HOST must be one of: " + ", ".join(HOSTS))
     if (args.action == "prepare-insight") != bool(args.from_run):
         parser.error("--from-run is required only with prepare-insight")
     accepting = args.action.startswith("accept-")
@@ -458,9 +517,9 @@ def main(argv=None):
         parser.error("--stage is required only with record-worker; --worker-status only with accept-*")
     try:
         if args.action == "prepare":
-            result = prepare(args.input_path)
+            result = prepare(args.input_path, host=host, model=args.model)
         elif args.action == "prepare-insight":
-            result = prepare_insight(args.input_path, args.from_run)
+            result = prepare_insight(args.input_path, args.from_run, host=host, model=args.model)
         elif args.action == "record-worker":
             result = record_worker(args.input_path, args.stage, args.worker_id)
         elif args.action == "verify-resume":

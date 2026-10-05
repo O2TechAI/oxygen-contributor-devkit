@@ -12,8 +12,8 @@ In the task prompt, source.md means RUN_DIR/source.md for an input ending in .md
 complete frozen source for evidence: a trajectory or an existing summary. When
 it is a summary, do not reconstruct unavailable trajectory details.
 
-First measure the source size and plan reads that fit both `exec_command` and
-the enclosing `functions.exec` output limits. Inspect the entire source through
+First measure the source size and plan reads that fit the output limits
+of the host tools described in the host notes above. Inspect the entire source through
 tool output in consecutive chunks, keeping track of your position. If output is
 truncated, reread the missing portion in smaller chunks before continuing. Use
 RUN_DIR/insight/insight.md to retain progress and source-grounded findings across
