@@ -24,8 +24,8 @@ Read no other inputs, repository files, prior runs, or sibling trajectories.
 Use local file tools only, without network access or further subagents.
 Keep the input and manifest unchanged. These are task instructions, not OS isolation.
 
-First measure the source size and plan reads that fit both `exec_command` and
-the enclosing `functions.exec` output limits. Inspect the entire source through
+First measure the source size and plan reads that fit the output limits
+of the host tools described in the host notes above. Inspect the entire source through
 tool output in consecutive chunks, keeping track of your position. If output is
 truncated, reread the missing portion in smaller chunks before continuing. Use the
 working summary to retain progress and findings across compaction when needed.

@@ -17,9 +17,18 @@ card validation, stage order, and execution records. This pipeline produces Mark
 
 ## Fixed workers
 
-Use `collaboration.spawn_agent` with `fork_turns="none"`, `model="gpt-6.1-sol"`,
-and `reasoning_effort="high"`. Check host support before dispatch and use the
-helper-generated arguments unchanged. Each stage gets a fresh worker.
+The worker host is chosen at initialization and saved in the run:
+
+- **Codex** (default): `collaboration.spawn_agent` with `fork_turns="none"`,
+  `model="gpt-6.1-sol"`, and `reasoning_effort="high"`.
+- **Claude Code** (`prepare --host claude`, or `OXYGEN_WORKER_HOST=claude`): the
+  Agent tool with `subagent_type="general-purpose"`, `model="opus"` (override with
+  `--model`), and `run_in_background=true`. Agent-tool workers start from a fresh
+  context; reasoning effort comes from the worker definition and is not set per call.
+
+Check host support before dispatch and use the helper-generated arguments
+unchanged. Each stage gets a fresh worker. The generated prompt begins with host
+notes describing that host's file-reading tools and limits.
 
 Initialization saves the model settings, complete prompt templates, labeler, and
 card parser in the run. Later stages use those saved versions. Repository edits or
@@ -67,12 +76,15 @@ values and pass paths as data or separate subprocess arguments.
 1. Initialize: `python3 scripts/trajectory_agents.py prepare INPUT`.
 2. For each stage in order (`summary`, `insight`, then optional `redaction`):
    - Run `python3 scripts/trajectory_agents.py STAGE-call INPUT`.
-   - Pass the returned arguments unchanged to `collaboration.spawn_agent`.
-   - Immediately record the returned ID:
+   - Pass the returned arguments unchanged to the saved host tool:
+     `collaboration.spawn_agent` (Codex) or the Agent tool (Claude Code).
+   - Immediately record the returned ID (the Claude Code Agent tool reports it as
+     `agentId`):
      `python3 scripts/trajectory_agents.py record-worker INPUT --stage STAGE --worker-id WORKER_ID`.
    - Wait for that worker to terminate and inspect its final task result. Proceed
      only if it reports `{"status":"complete"}`. Tool termination by itself does
-     not establish task success.
+     not establish task success. On Claude Code, the background worker's
+     completion notification carries its final message as the result.
    - Accept:
      `python3 scripts/trajectory_agents.py accept-STAGE INPUT --worker-id WORKER_ID --worker-status complete`.
    - Advance only when acceptance succeeds.

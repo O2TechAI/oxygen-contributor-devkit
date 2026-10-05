@@ -30,6 +30,20 @@ the instruction below. Adjust the toolkit folder name if needed.
 Follow steps 1–5 in ./oxygen-contributor-devkit/readme.md and its referenced skill to run the complete pipeline for the current workspace, through local review import. Save outputs in a new timestamped run directory. Validate the results and report counts, failures, links to the final artifacts, and the local review URL.
 ```
 
+## Launch the complete pipeline from Claude Code
+
+For workspaces developed with Claude Code, open Claude Code in the workspace and
+paste the instruction below. Adjust the toolkit folder name if needed.
+
+```text
+Follow ./oxygen-contributor-devkit/readme.md for Claude Code trajectories: use the Claude Code variants of steps 1–2, then steps 3–5 with workers on the Claude Code host (prepare --host claude), through local review import. Save outputs in a new timestamped run directory. Validate the results and report counts, failures, links to the final artifacts, and the local review URL.
+```
+
+The Claude Code path needs the locally recorded sessions under each Claude Code
+config directory's `projects/` (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and a host
+that exposes the Agent tool. Everything from step 3 onward is the same for both
+sources, because both exporters produce the same Markdown format.
+
 ### Prerequisites and defaults
 
 - Git and Python 3.10 or newer; Node.js 22.13 or newer and npm for the review app.
@@ -64,7 +78,9 @@ The collection and stripping steps are standalone Python tools; the agent workfl
   reusable skill-candidate extraction, and the shared six-field card schema.
 - `prompts/sensitive-redaction.md` — minimal privacy edits that preserve
   nonsensitive content and formatting.
-- `tools/` — utilities and supporting tools.
+- `tools/` — utilities and supporting tools, including the Codex collector/stripper
+  and the Claude Code variants (`collect_claude_sessions.py`,
+  `strip_claude_tool_outputs.py`, `claude_trajectory_markdown.py`).
 - `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, and privacy-redaction workers.
 - `review-app/` — the Oxygen human-review service and evidence-linked review UI.
 
@@ -116,6 +132,31 @@ same session ID share one snapshot; different prefixes stay separate. Dry-run
 entries contain discovery metadata only. Directories use `0700`, files use `0600`,
 and existing output destinations are refused. Collection validates initial
 metadata; the stripper validates the complete rollout structure.
+
+### Claude Code sessions
+
+Claude Code stores each session at `CONFIG/projects/<cwd-slug>/<sessionId>.jsonl`.
+Collect them with the Claude Code collector; repeat `--claude-config-dir` for
+every config directory that may hold sessions for the workspace:
+
+```bash
+umask 077
+mkdir /absolute/private-run
+python3 tools/collect_claude_sessions.py \
+  --workspace /absolute/target-workspace \
+  --claude-config-dir ~/.claude \
+  --output-dir /absolute/private-run/collection
+```
+
+Without `--claude-config-dir`, the collector reads `$CLAUDE_CONFIG_DIR` or
+`~/.claude`. Claude Code session files have no header record, so workspace
+membership comes from the `cwd` of the first conversation record; the project
+directory name is a lossy slug and is not used. Subagent transcripts
+(`<sessionId>/subagents/`, `agent-*.jsonl`, or sidechain records) are excluded.
+Files containing only metadata records are excluded as `no_conversation_records`.
+Manifest entries add `entrypoint`, `claude_code_version`, and `first_timestamp`;
+use `first_timestamp` for the chronology in step 3. The snapshot contract and
+private permissions are the same as for Codex.
 
 ## 2. Strip outputs and export Markdown
 
@@ -314,6 +355,43 @@ Live rollouts must first be frozen by collection. Keep source files and Codex
 databases untouched. Removing results breaks protocol pairing and paginated
 history; these artifacts must not replace a live rollout or SQLite projection.
 
+### Claude Code sessions
+
+Use `tools/strip_claude_tool_outputs.py` with the same arguments
+(`--output`, `--markdown`, `--report`, optional `--tokenizer`). It writes the same
+Markdown headings as the Codex exporter. The structural policy differs because
+the log format differs:
+
+- **Removed:** every `tool_result` block and the record-level `toolUseResult`
+  copy; server tool results; background task notifications (as user messages or
+  as `queued_command` attachments with `commandMode: task-notification`);
+  `<local-command-stdout>` and shell-mode output; all context attachments
+  (reminders, skill and tool listings, file contents, hook output); system records
+  other than `compact_boundary`; and metadata records (titles, queue operations,
+  file-history backups, mode changes). Unknown metadata record types are dropped
+  and counted rather than aborting, because Claude Code adds them often; unknown
+  content blocks inside user or assistant messages still abort.
+- **Opaque data:** thinking `signature` and `redacted_thinking.data` fields, and
+  base64 `data` in image and document blocks, are removed. Signature-only
+  thinking blocks contribute no Markdown; readable thinking appears under
+  `assistant reasoning`. Images and documents appear as `[image omitted]` or
+  `[document omitted]`.
+- **Retained human input:** results of `AskUserQuestion` calls (with their
+  structured `answers`) and results of tool calls the user rejected, matched by
+  the preceding `tool_use` ID and the harness's structured rejection marker, appear
+  under `user input result` with an `Outcome` of `answered`, `rejected by user`, or
+  `error`. Messages typed while the agent was working (`queued_command` with
+  `commandMode: prompt`) appear under `user`.
+- **Markdown filtering:** `isMeta` messages (caveats, skill bodies, image notes,
+  scheduled prompts) are omitted; `<system-reminder>` blocks at the start or end of
+  typed text are removed; slash commands render as `/name args`; compaction
+  summaries render under `compaction summary`; synthetic API-error messages are
+  omitted. Rewind branches stay in file order and are counted in
+  `markdown.rewind_branch_points`.
+
+Subagent prompts in `Agent` calls are plaintext and retained. The subagent's own
+transcript and its returned report are not included.
+
 ## 3. Filter and select converted trajectories
 
 For the current temporary pilot, apply these steps after stripping and Markdown
@@ -345,6 +423,10 @@ Use each selected `.md` file as the input to
 python3 skills/oxygen-deterministic-trajectory-agents/scripts/trajectory_agents.py \
   prepare /absolute/private-run/trajectory-001.md
 ```
+
+When the workers run on Claude Code, add `--host claude` (optionally
+`--model sonnet` or another Agent-tool model alias). The host is saved in the run;
+later stage calls produce Agent-tool arguments automatically.
 
 The run lives at `trajectory-001.md.oxygen-agents/`. Initialization freezes the
 Markdown as `source.md` and snapshots the current prompts and worker settings.
