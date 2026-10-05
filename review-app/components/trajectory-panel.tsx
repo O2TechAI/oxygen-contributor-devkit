@@ -70,7 +70,7 @@ export function TrajectoryPanel({
   ).length;
   const runs = [...new Set(groups.map((group) => group.run))];
   const selectClass =
-    'h-9 min-w-0 rounded-md border bg-background px-2 text-sm';
+    'h-8 min-w-0 rounded-[4px] border bg-background px-2 text-sm';
 
   function toggle(ids: string[], checked: boolean) {
     setSelectedIds((current) =>
@@ -151,7 +151,7 @@ export function TrajectoryPanel({
           disabled={pending}
           className="grid min-h-0 flex-1 grid-rows-[auto_1fr]"
         >
-          <div className="space-y-3 border-b bg-muted/20 p-4">
+          <div className="space-y-3 border-b bg-[color:var(--sidebar)] p-4">
             <Input
               aria-label="Search trajectories"
               placeholder="Search trajectory, title, or run…"
