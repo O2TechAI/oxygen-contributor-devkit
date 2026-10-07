@@ -892,7 +892,7 @@ export default function Home() {
           </p>
           <form className="mt-7 space-y-4" onSubmit={handleLogin}>
             <label className="block space-y-2" htmlFor="login-username">
-              <span className="text-xs font-semibold uppercase text-muted-foreground">
+              <span className="text-xs font-medium text-muted-foreground">
                 Account
               </span>
               <Input
@@ -904,7 +904,7 @@ export default function Home() {
               />
             </label>
             <label className="block space-y-2" htmlFor="login-password">
-              <span className="text-xs font-semibold uppercase text-muted-foreground">
+              <span className="text-xs font-medium text-muted-foreground">
                 Password
               </span>
               <Input
@@ -979,24 +979,22 @@ export default function Home() {
         onOpenChange={setExportWarningOpen}
         onConfirm={downloadActiveReview}
       />
-      <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b bg-card px-4 py-3 sm:px-6">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Sparkles className="size-4" />
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-background px-3 py-1.5 sm:px-4">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          <span className="grid size-5 shrink-0 place-items-center rounded-[4px] bg-foreground text-background">
+            <Sparkles className="size-3" />
           </span>
-          <div>
-            <p className="text-sm font-semibold leading-none">Oxygen Review</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Human approval workspace
-            </p>
-          </div>
+          <p className="px-1 text-sm font-medium" title="Human approval workspace">
+            Oxygen Review
+          </p>
+          <span className="text-sm text-muted-foreground/60">/</span>
           <select
             aria-label="Choose trajectory review"
             disabled={editorTarget !== null}
             value={active.id}
             onChange={(event) => chooseReview(event.target.value)}
             title={labels.get(active.id)}
-            className="h-9 w-full min-w-0 flex-1 basis-48 truncate rounded-md border bg-background px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-7 w-full min-w-0 max-w-xl flex-1 basis-48 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
           >
             {reviews.map((review) => (
               <option key={review.id} value={review.id}>
@@ -1050,7 +1048,7 @@ export default function Home() {
             <Download data-icon="inline-start" />
             Export
           </Button>
-          <Button variant="outline" onClick={openBatchExport}>
+          <Button variant="ghost" onClick={openBatchExport}>
             <List data-icon="inline-start" />
             Trajectories ({groupTrajectories(reviews).length})
           </Button>
@@ -1082,7 +1080,9 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="shrink-0 border-b px-4 py-2 text-sm sm:px-6">
+      <div className="mx-3 mt-3 flex shrink-0 gap-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3 text-sm leading-[1.5] sm:mx-4">
+        <span aria-hidden className="text-base leading-[1.4]">💡</span>
+        <div className="min-w-0">
         <p className="font-medium">
           Would this insight help you with future work on this project or
           another?
@@ -1102,10 +1102,11 @@ export default function Home() {
         <p className="mt-1 break-all text-xs text-muted-foreground">
           {active.projectName} · {active.sourcePath}
         </p>
+        </div>
       </div>
       {active.format === 'v5' && (
-        <section className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b bg-muted/25 px-4 py-3 text-xs sm:px-6">
-          <span className="font-semibold">
+        <section className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 text-xs text-muted-foreground sm:px-5">
+          <span className="font-medium text-foreground">
             Protocol v{active.protocolVersion}
           </span>
           <span className="capitalize">{active.stage} stage</span>
@@ -1113,8 +1114,8 @@ export default function Home() {
             className={cn(
               'inline-flex items-center gap-1.5 font-medium',
               active.privacyStatus === 'redacted'
-                ? 'text-[color:var(--evidence-strong)]'
-                : 'text-destructive',
+                ? 'rounded-[3px] bg-[color:var(--type-explicit-bg)] px-1.5 py-0.5 text-[color:var(--type-explicit-strong)]'
+                : 'rounded-[3px] bg-[#ffe2dd] px-1.5 py-0.5 text-[#5d1715]',
             )}
           >
             {active.privacyStatus === 'redacted' ? (
@@ -1157,17 +1158,18 @@ export default function Home() {
           className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
           aria-labelledby="summary-heading"
         >
-          <div className="flex h-14 shrink-0 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
+          <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-muted-foreground" />
-              <h1 id="summary-heading" className="font-semibold">
+              <h1 id="summary-heading" className="text-sm font-medium">
                 Summary
               </h1>
-              <Badge variant="secondary">{active.summaryLines.length}</Badge>
+              <span className="text-sm text-muted-foreground">{active.summaryLines.length}</span>
             </div>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
+              className="text-muted-foreground"
               onClick={() => openCreate('summary')}
             >
               <Plus data-icon="inline-start" />
@@ -1176,7 +1178,7 @@ export default function Home() {
           </div>
           <ScrollArea className="h-[min(560px,60dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
             {active.format === 'v5' ? (
-              <div className="mx-auto max-w-4xl px-3 py-6 sm:px-7">
+              <div className="mx-auto max-w-[760px] px-4 pt-6 pb-24 sm:px-12">
                 {active.summaryLines.length ? (
                   <RichSummary
                     markdown={summaryMarkdown(active.summaryLines)}
@@ -1206,20 +1208,21 @@ export default function Home() {
         </section>
 
         <section
-          className="flex min-h-0 min-w-0 flex-col"
+          className="flex min-h-0 min-w-0 flex-col bg-[color:var(--sidebar)]"
           aria-labelledby="insights-heading"
         >
-          <div className="flex h-14 shrink-0 items-center justify-between border-b bg-muted/20 px-4 sm:px-6">
+          <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
             <div className="flex items-center gap-2">
               <Lightbulb className="size-4 text-muted-foreground" />
-              <h2 id="insights-heading" className="font-semibold">
+              <h2 id="insights-heading" className="text-sm font-medium">
                 Insight cards
               </h2>
-              <Badge variant="secondary">{active.insights.length}</Badge>
+              <span className="text-sm text-muted-foreground">{active.insights.length}</span>
             </div>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
+              className="text-muted-foreground"
               onClick={() => openCreate('insight')}
             >
               <Plus data-icon="inline-start" />
@@ -1594,7 +1597,7 @@ export default function Home() {
 
               {editorTarget?.mode === 'edit' && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase text-muted-foreground">
+                  <p className="text-xs font-medium text-muted-foreground">
                     Original generated text
                   </p>
                   <div className="max-h-40 overflow-auto rounded-md border bg-muted/40 p-4 text-sm leading-6 text-muted-foreground whitespace-pre-wrap">
@@ -1675,10 +1678,21 @@ export default function Home() {
 
 function InsightKeyLabel({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex rounded-sm border border-[color:var(--insight-border)] bg-[color:var(--insight-bg)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[color:var(--insight-strong)]">
+    <span className="inline-flex text-xs font-medium text-muted-foreground">
       {children}
     </span>
   );
+}
+
+const SELECTED_CARD =
+  'shadow-[0_0_0_2px_rgba(35,131,226,0.45),rgba(15,15,15,0.08)_0_2px_6px]';
+
+// Pastel status tags.
+function insightStatusClasses(status: InsightStatus) {
+  if (status === 'accepted') return 'bg-[#dbeddb] text-[#1c3829]';
+  if (status === 'needs_review') return 'bg-[#ffe2dd] text-[#5d1715]';
+  if (status === 'rejected') return 'bg-[#e3e2e080] text-[#32302c]/70';
+  return 'bg-[#e3e2e080] text-[#32302c]';
 }
 
 function insightTypeClasses(type?: string) {
@@ -1687,31 +1701,26 @@ function insightTypeClasses(type?: string) {
     case 'user explicit':
       return {
         badge:
-          'border-[color:var(--type-explicit-border)] bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]',
-        selected:
-          'border-[color:var(--type-explicit-border)] bg-[color:var(--type-explicit-bg)] shadow-[inset_3px_0_0_var(--type-explicit-strong)] ring-1 ring-inset ring-[color:var(--type-explicit-border)]',
+          'border-transparent bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]',
+        selected: SELECTED_CARD,
       };
     case 'user implicit':
       return {
         badge:
-          'border-[color:var(--type-implicit-border)] bg-[color:var(--type-implicit-bg)] text-[color:var(--type-implicit-strong)]',
-        selected:
-          'border-[color:var(--type-implicit-border)] bg-[color:var(--type-implicit-bg)] shadow-[inset_3px_0_0_var(--type-implicit-strong)] ring-1 ring-inset ring-[color:var(--type-implicit-border)]',
+          'border-transparent bg-[color:var(--type-implicit-bg)] text-[color:var(--type-implicit-strong)]',
+        selected: SELECTED_CARD,
       };
     case 'agent':
     case 'agent encountered':
       return {
         badge:
-          'border-[color:var(--type-agent-border)] bg-[color:var(--type-agent-bg)] text-[color:var(--type-agent-strong)]',
-        selected:
-          'border-[color:var(--type-agent-border)] bg-[color:var(--type-agent-bg)] shadow-[inset_3px_0_0_var(--type-agent-strong)] ring-1 ring-inset ring-[color:var(--type-agent-border)]',
+          'border-transparent bg-[color:var(--type-agent-bg)] text-[color:var(--type-agent-strong)]',
+        selected: SELECTED_CARD,
       };
     default:
       return {
-        badge:
-          'border-[color:var(--insight-border)] bg-[color:var(--insight-bg)] text-[color:var(--insight-strong)]',
-        selected:
-          'border-[color:var(--insight-border)] bg-[color:var(--insight-bg)] ring-1 ring-inset ring-[color:var(--insight-border)]',
+        badge: 'border-transparent bg-[#e3e2e080] text-[#32302c]',
+        selected: SELECTED_CARD,
       };
   }
 }
@@ -1743,16 +1752,16 @@ function InsightCard({
   return (
     <article
       className={cn(
-        'rounded-lg border bg-card transition-[background-color,border-color,box-shadow]',
+        'rounded-[6px] border-0 bg-card shadow-[var(--ui-shadow)] transition-[box-shadow]',
         selected && typeClasses.selected,
         insight.status === 'rejected' && 'opacity-60',
       )}
     >
-      <div className="min-w-0 p-4">
+      <div className="min-w-0 px-5 pt-4 pb-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs font-bold text-muted-foreground">
+              <span className="font-mono text-xs text-muted-foreground">
                 {insight.id}
               </span>
               {insight.authorship === 'reviewer' && (
@@ -1764,11 +1773,8 @@ function InsightCard({
                 </Badge>
               )}
             </div>
-            <div className="mt-3 flex min-w-0 items-baseline gap-2">
-              {structured && keys.has('title') && (
-                <InsightKeyLabel>Title</InsightKeyLabel>
-              )}
-              <h3 className="min-w-0 font-semibold leading-6">
+            <div className="mt-2 flex min-w-0 items-baseline gap-2">
+              <h3 className="min-w-0 text-lg font-semibold leading-[1.35]">
                 <button
                   type="button"
                   aria-pressed={selected}
@@ -1782,12 +1788,11 @@ function InsightCard({
           </div>
           <span
             className={cn(
-              'shrink-0 text-[10px] font-semibold uppercase text-muted-foreground',
-              insight.status === 'needs_review' && 'text-destructive',
-              insight.status === 'accepted' &&
-                'text-[color:var(--evidence-strong)]',
+              'inline-flex shrink-0 items-center gap-1.5 rounded-[3px] px-1.5 py-0.5 text-xs',
+              insightStatusClasses(insight.status),
             )}
           >
+            <span aria-hidden className="size-1.5 rounded-full bg-current opacity-70" />
             {insightStatusLabel(insight.status)}
           </span>
         </div>
@@ -1795,17 +1800,17 @@ function InsightCard({
           <>
             {skillCandidate ? (
               <>
-                <div className="mt-4 rounded-sm border-l-2 border-[color:var(--insight-border)] bg-[color:var(--insight-bg)] px-3 py-2.5">
+                <div className="mt-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3">
                   <InsightKeyLabel>Description</InsightKeyLabel>
                   <InsightProse markdown={insight.description ?? ''} />
                 </div>
                 {keys.has('workflow') && (
-                  <div className="mt-4 text-sm leading-6 text-muted-foreground">
+                  <div className="mt-4">
                     <InsightKeyLabel>Workflow</InsightKeyLabel>
                     <InsightProse markdown={insight.workflow ?? ''} />
                   </div>
                 )}
-                <div className="mt-4 text-sm leading-6 text-muted-foreground">
+                <div className="mt-4">
                   <InsightKeyLabel>Example</InsightKeyLabel>
                   <InsightProse markdown={insight.example ?? ''} />
                 </div>
@@ -1813,7 +1818,7 @@ function InsightCard({
             ) : (
               <>
                 {keys.has('takeaway') && insight.takeaway && (
-                  <div className="mt-4 rounded-sm border-l-2 border-[color:var(--insight-border)] bg-[color:var(--insight-bg)] px-3 py-2.5">
+                  <div className="mt-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3">
                     <InsightKeyLabel>Takeaway</InsightKeyLabel>
                     <InsightTakeaway markdown={insight.takeaway} />
                   </div>
@@ -1828,7 +1833,7 @@ function InsightCard({
                     </div>
                   )}
                   {keys.has('scope') && insight.scope && (
-                    <div className="rounded-sm bg-[color:var(--insight-bg)] px-3 py-2">
+                    <div>
                       <dt>
                         <InsightKeyLabel>Scope</InsightKeyLabel>
                       </dt>
@@ -1857,7 +1862,7 @@ function InsightCard({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {structured && keys.has('evidence') && (
             <InsightKeyLabel>Evidence</InsightKeyLabel>
@@ -1866,7 +1871,7 @@ function InsightCard({
             <button
               key={line}
               type="button"
-              className="rounded-md border border-[color:var(--evidence-border)] bg-[color:var(--evidence-bg)] px-2 py-1 font-mono text-xs font-semibold text-[color:var(--evidence-strong)]"
+              className="rounded-[3px] bg-[color:var(--ui-callout)] px-1.5 py-0.5 font-mono text-xs text-foreground/80 transition-colors hover:bg-[color:var(--evidence-bg)] hover:text-[color:var(--evidence-strong)]"
               onClick={() => onEvidence(line)}
             >
               {line}
@@ -2041,7 +2046,7 @@ function Field({
 }) {
   return (
     <label htmlFor={htmlFor} className="block space-y-2">
-      <span className="text-xs font-semibold uppercase text-muted-foreground">
+      <span className="text-xs font-medium text-muted-foreground">
         {label}
       </span>
       {children}

@@ -54,15 +54,15 @@ function SummaryBlock({
       id={firstId}
       data-summary-lines={ids.join(' ')}
       className={cn(
-        'group/summary grid scroll-mt-24 grid-cols-[minmax(0,1fr)_60px] gap-3 rounded-sm border-l-2 border-transparent px-3 py-2 transition-colors',
+        'group/summary grid scroll-mt-24 grid-cols-[minmax(0,1fr)_60px] gap-2 rounded-[4px] px-2 py-0.5 transition-colors hover:bg-[rgba(55,53,47,0.03)]',
         highlighted &&
-          'border-[color:var(--evidence-accent)] bg-[color:var(--evidence-bg)]',
+          'bg-[color:var(--evidence-bg)] hover:bg-[color:var(--evidence-bg)] shadow-[inset_2px_0_0_var(--evidence-accent)]',
       )}
     >
       <div className="min-w-0">
         {children}
         {modified && (
-          <span className="mt-1 inline-block text-[10px] font-semibold uppercase text-[color:var(--insight-strong)]">
+          <span className="mt-1 inline-block rounded-[3px] bg-[#fdecc8] px-1.5 text-xs text-[#402c1b]">
             Edited
           </span>
         )}
@@ -103,17 +103,17 @@ export function RichSummary(props: RichSummaryProps) {
     h1: ({ node, children }) =>
       block(
         node,
-        <h2 className="text-2xl font-semibold leading-9">{children}</h2>,
+        <h2 className="mt-6 mb-1 text-[1.875rem] font-bold leading-[1.2] tracking-[-0.01em]">{children}</h2>,
       ),
     h2: ({ node, children }) =>
       block(
         node,
-        <h3 className="text-xl font-semibold leading-8">{children}</h3>,
+        <h3 className="mt-5 mb-px text-[1.5rem] font-semibold leading-[1.3]">{children}</h3>,
       ),
     h3: ({ node, children }) =>
       block(
         node,
-        <h4 className="text-lg font-semibold leading-7">{children}</h4>,
+        <h4 className="mt-4 mb-px text-[1.25rem] font-semibold leading-[1.3]">{children}</h4>,
       ),
     h4: ({ node, children }) =>
       block(
@@ -133,21 +133,21 @@ export function RichSummary(props: RichSummaryProps) {
     p: ({ node, children }) =>
       block(
         node,
-        <p className="text-[15px] leading-7 text-foreground/90">{children}</p>,
+        <p className="py-[3px] text-base leading-[1.6]">{children}</p>,
       ),
     ol: ({ children }) => (
-      <ol className="my-2 list-decimal space-y-1 pl-7 marker:font-semibold marker:text-muted-foreground">
+      <ol className="my-1 list-decimal space-y-1 pl-6 leading-[1.6]">
         {children}
       </ol>
     ),
     ul: ({ children }) => (
-      <ul className="my-2 list-disc space-y-1 pl-7 marker:text-muted-foreground">
+      <ul className="my-1 list-disc space-y-1 pl-6 leading-[1.6]">
         {children}
       </ul>
     ),
     li: ({ children }) => <li className="pl-1">{children}</li>,
     blockquote: ({ children }) => (
-      <blockquote className="my-3 border-l-2 border-[color:var(--evidence-border)] pl-4 text-muted-foreground">
+      <blockquote className="my-1 border-l-[3px] border-foreground pl-4 text-base">
         {children}
       </blockquote>
     ),
@@ -160,7 +160,7 @@ export function RichSummary(props: RichSummaryProps) {
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="font-medium text-[color:var(--evidence-strong)] underline decoration-[color:var(--evidence-border)] underline-offset-4"
+        className="text-foreground underline decoration-[rgba(55,53,47,0.4)] underline-offset-2 hover:decoration-foreground"
       >
         {children}
       </a>
@@ -169,7 +169,7 @@ export function RichSummary(props: RichSummaryProps) {
       <code
         className={cn(
           className,
-          'rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
+          'rounded-[4px] bg-[color:var(--ui-code-bg)] px-[0.3em] py-[0.15em] font-mono text-[85%] text-[color:var(--ui-code-fg)]',
         )}
       >
         {children}
@@ -178,7 +178,7 @@ export function RichSummary(props: RichSummaryProps) {
     pre: ({ node, children }) =>
       block(
         node,
-        <pre className="overflow-x-auto rounded-md border bg-muted/50 p-4 text-sm leading-6 [&_code]:bg-transparent [&_code]:p-0">
+        <pre className="overflow-x-auto rounded-[4px] bg-[#f7f6f3] px-8 py-6 font-mono text-[85%] leading-[1.5] [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-foreground">
           {children}
         </pre>,
       ),
@@ -186,18 +186,18 @@ export function RichSummary(props: RichSummaryProps) {
       block(
         node,
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
+          <table className="w-full border-collapse text-left text-sm leading-[1.5]">
             {children}
           </table>
         </div>,
       ),
-    thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
+    thead: ({ children }) => <thead className="bg-[#f7f6f3]">{children}</thead>,
     th: ({ children }) => (
-      <th className="border px-3 py-2 font-semibold">{children}</th>
+      <th className="border border-[#e9e9e7] px-2 py-1.5 font-medium text-muted-foreground">{children}</th>
     ),
-    td: ({ children }) => <td className="border px-3 py-2">{children}</td>,
+    td: ({ children }) => <td className="border border-[#e9e9e7] px-2 py-1.5">{children}</td>,
     hr: ({ node }) =>
-      block(node, <hr className="my-3 border-[color:var(--border)]" />),
+      block(node, <hr className="my-3 border-[#e9e9e7]" />),
     input: ({ node: _node, ...inputProps }) => (
       <input
         {...inputProps}

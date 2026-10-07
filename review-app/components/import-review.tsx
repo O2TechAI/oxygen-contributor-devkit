@@ -91,7 +91,7 @@ export function ImportReview({
         disabled={disabled}
         render={
           <Button
-            variant="outline"
+            variant="ghost"
             title={
               disabled
                 ? 'Apply and save your edits before importing'
