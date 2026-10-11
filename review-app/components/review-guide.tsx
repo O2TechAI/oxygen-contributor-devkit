@@ -61,7 +61,7 @@ export function ReviewGuide({ review }: { review: Review }) {
           </SheetHeader>
           <div className="space-y-5 px-4 text-sm leading-6">
             <a
-              href="/contribute"
+              href="https://oxygen.o2tech.ai/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary underline underline-offset-4"

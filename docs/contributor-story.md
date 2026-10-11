@@ -1,6 +1,6 @@
 # Contributor story and experience — Zihan (3 / 4 / 5)
 
-This is the copy and implementation brief for the contribution page and review
+This is the copy and implementation brief for the Oxygen homepage and review
 prompts. Contributor-facing web copy is English, matching the existing devkit.
 The Chinese pitches below can be used in a team discussion or invitation.
 
@@ -51,18 +51,9 @@ Oxygen 想留下的是这些可复用的方法，而不是更多聊天记录。
 
 ## 网页（第 5 项）
 
-`review-app/app/contribute/page.tsx` at `/contribute`:
-
-1. Why: keep the method behind the answer.
-2. Show: an explicitly illustrative, clickable three-step session.
-3. Act: choose a trajectory → review evidence → inspect and export.
-4. Boundaries: human privacy check, chosen model host, intentional sharing.
-5. Research direction: new-task skill evaluation, explicitly not implemented here.
-6. CTA: open the existing review workspace or read setup instructions.
-
-The first-use Review help panel links here in a new tab so an invitation/story
-does not discard an active review. Source and protocol details live in Page
-information. The invitation page does not read or display review data.
+The contributor story lives on the [Oxygen homepage](https://oxygen.o2tech.ai/).
+The first-use Review help panel links there in a new tab so opening it does not
+discard an active review. Source and protocol details live in Page information.
 
 ## Scope and handoffs
 
@@ -76,8 +67,8 @@ information. The invitation page does not read or display review data.
 
 ## Acceptance path
 
-- Open `/contribute` at mobile and desktop widths; all story sections and CTA
-  links are usable. Selecting each example moment updates its explanation.
+- Open the Why contribute link from Review help; it opens the Oxygen homepage
+  in a new tab and leaves the active review open.
 - Open the existing workspace. First-use help can be dismissed and reopened;
   refreshing remembers dismissal. Progress beside Complete counts accepted and
   declined cards only; Evidence changed cards still require review.
@@ -91,8 +82,6 @@ information. The invitation page does not read or display review data.
 ## Verified locally
 
 - Existing review suite plus the source-label regression check: 61 tests passed; TypeScript and production build passed.
-- Chromium: story selection and review links worked; no horizontal overflow at
-  375, 768, or 1440 px on either page; no browser exceptions observed.
 - Using only the bundled synthetic review in the worktree's SQLite database:
   accept/decline updated progress, autosave persisted decisions across refresh,
   and `review.json` in the actual export preserved both decisions.
@@ -107,7 +96,7 @@ information. The invitation page does not read or display review data.
 ## Live homepage copy — oxygen.o2tech.ai
 
 Target: <https://oxygen.o2tech.ai/>. This section is replacement copy for the
-live research homepage, which is separate from the devkit's `/contribute` page.
+live research homepage. The devkit links directly to this homepage.
 The live page was read in Chromium. Its source/deployment is not configured in
 this checkout; the text below has not been published.
 

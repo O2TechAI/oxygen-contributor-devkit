@@ -6,8 +6,8 @@ reviews remain readable and editable.
 
 ## Contributor invitation
 
-Open `/contribute` for the contribution story, a clearly labeled illustrative
-session, and links to the review workspace and setup. Review help opens on first
+Visit the [Oxygen homepage](https://oxygen.o2tech.ai/) for the contribution story
+and ways to participate. Review help links there in a new tab, opens on first
 use and can be reopened with **Review help**. Dismissing it is remembered in
 this browser. The header shows `3/3 reviewed` beside **Complete**; accepted and
 declined cards both count. This is review progress, not an evaluation score.

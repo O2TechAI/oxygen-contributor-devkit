@@ -7,7 +7,7 @@
 
 **Turn agent sessions into knowledge worth keeping.**
 
-[Quick start](#launch-the-complete-pipeline-from-codex) · [Why contribute](docs/contributor-story.md) · [Review app](review-app/README.md) · [Founding team](#founding-team)
+[Quick start](#launch-the-complete-pipeline-from-codex) · [Why contribute](https://oxygen.o2tech.ai/) · [Review app](review-app/README.md) · [Founding team](#founding-team)
 
 <img src="docs/assets/oxygen-hero.svg" alt="Animated diagram of one agent session: you tell the agent “Don’t just retry the test. Find out why CI fails,” and the agent discovers “The code was fine. CI runs in UTC.” Oxygen turns a forgotten lesson into a reusable one: a summary (“Why CI failed: timezone, not code.”) and a reusable skill (“Tests fail only in CI? Before changing code, check the timezone.”), which a person reviews with Keep, Edit, Decline or Export." width="100%" />
 
@@ -71,10 +71,8 @@ and local database state live under the toolkit's `review-app/` directory.
 
 ## Contributor invitation
 
-Open `/contribute` on your running review app for the contributor story, an
-interactive example, and a guide to reviewing your first trajectory. The review
-workspace links back to it without closing your work. See the
-[contributor story](docs/contributor-story.md) for invitation copy and scope.
+Visit the [Oxygen homepage](https://oxygen.o2tech.ai/) for the contributor story
+and ways to participate. Review help opens it in a new tab without closing your work.
 
 ## Repository layout
 
