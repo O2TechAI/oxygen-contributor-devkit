@@ -7,7 +7,7 @@
 
 **Turn agent sessions into knowledge worth keeping.**
 
-[Quick start](#launch-the-complete-pipeline-from-codex) · [Review app](review-app/README.md) · [Founding team](#founding-team)
+[Quick start](#launch-the-complete-pipeline-from-codex) · [Why contribute](docs/contributor-story.md) · [Review app](review-app/README.md) · [Founding team](#founding-team)
 
 <img src="docs/assets/oxygen-hero.svg" alt="Animated diagram of one agent session: you tell the agent “Don’t just retry the test. Find out why CI fails,” and the agent discovers “The code was fine. CI runs in UTC.” Oxygen turns a forgotten lesson into a reusable one: a summary (“Why CI failed: timezone, not code.”) and a reusable skill (“Tests fail only in CI? Before changing code, check the timezone.”), which a person reviews with Keep, Edit, Decline or Export." width="100%" />
 
@@ -68,6 +68,13 @@ UTC timestamp such as `20260922T203000Z` for each run, create its directory with
 private permissions, and keep generated artifacts out of commits. Record the
 toolkit revision and any local modifications in the run report. App dependencies
 and local database state live under the toolkit's `review-app/` directory.
+
+## Contributor invitation
+
+Open `/contribute` on your running review app for the contributor story, an
+interactive example, and a guide to reviewing your first trajectory. The review
+workspace links back to it without closing your work. See the
+[contributor story](docs/contributor-story.md) for invitation copy and scope.
 
 ## Repository layout
 

@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { RichSummary } from '@/components/rich-summary';
+import { ReviewGuide } from '@/components/review-guide';
 import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
 import { ImportReview } from '@/components/import-review';
 import { TrajectoryPanel } from '@/components/trajectory-panel';
@@ -1058,11 +1059,13 @@ export default function Home() {
             </Button>
           )}
           <Button
-            disabled={saveState === 'saving' || !completable}
+            disabled={saveState === 'saving' || editorTarget !== null || !completable}
             title={
-              completable
-                ? 'Complete review'
-                : 'Complete a redacted review after resolving every Insight'
+              editorTarget !== null
+                ? 'Apply or cancel your edit before completing'
+                : completable
+                  ? 'Complete review'
+                  : 'Complete a redacted review after resolving every Insight'
             }
             onClick={() => persist('completed')}
           >
@@ -1080,30 +1083,12 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mx-3 mt-3 flex shrink-0 gap-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3 text-sm leading-[1.5] sm:mx-4">
-        <span aria-hidden className="text-base leading-[1.4]">💡</span>
-        <div className="min-w-0">
-        <p className="font-medium">
-          Would this insight help you with future work on this project or
-          another?
-        </p>
-        <p className="mt-1 text-muted-foreground">
-          Accept useful, accurate guidance; edit what needs correction; reject
-          unsupported or unhelpful cards. You can add a missing insight from
-          your own experience.
-        </p>
-        {workflowField && (
-          <p className="mt-1 text-muted-foreground">
-            Description: what the skill does and when to use it. Workflow: the
-            reusable method. Example: how it was applied in a recorded case,
-            with the actual outcome made clear.
-          </p>
-        )}
-        <p className="mt-1 break-all text-xs text-muted-foreground">
-          {active.projectName} · {active.sourcePath}
-        </p>
-        </div>
-      </div>
+      <ReviewGuide review={active} onNext={(id) => {
+        setSelectedInsight(id);
+        document.getElementById(`insight-${id}`)?.scrollIntoView({
+          behavior: 'smooth', block: 'start',
+        });
+      }} />
       {active.format === 'v5' && (
         <section className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 text-xs text-muted-foreground sm:px-5">
           <span className="font-medium text-foreground">
@@ -1751,6 +1736,7 @@ function InsightCard({
 
   return (
     <article
+      id={`insight-${insight.id}`}
       className={cn(
         'rounded-[6px] border-0 bg-card shadow-[var(--ui-shadow)] transition-[box-shadow]',
         selected && typeClasses.selected,

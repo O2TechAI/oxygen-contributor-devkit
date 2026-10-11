@@ -4,6 +4,16 @@ Oxygen Review is the contributor approval surface for readable Summary and
 Insight artifacts with Python-generated evidence labels. Historical grouped
 reviews remain readable and editable.
 
+## Contributor invitation
+
+Open `/contribute` for the contribution story, a clearly labeled illustrative
+session, and links to the review workspace and setup. The review guide links to
+it in a new tab and offers an optional quality checklist, decided-card progress,
+and a shortcut to the next unresolved card. Accepted and declined cards both
+count as decided; this is review progress, not a skill evaluation score.
+These prompts do not collect questionnaire responses. See the
+[story and scope](../docs/contributor-story.md) for the Zihan / Zidi handoffs.
+
 ## For reviewers: what is an insight?
 
 Protocol v9 cards describe potential reusable skills worth developing for other
