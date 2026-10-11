@@ -16,11 +16,14 @@ const GUIDE_SEEN = 'oxygen-review-guide-seen-v1';
 export function ReviewGuide({ review }: { review: Review }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    try {
-      setOpen(localStorage.getItem(GUIDE_SEEN) !== '1');
-    } catch {
-      setOpen(true);
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        setOpen(localStorage.getItem(GUIDE_SEEN) !== '1');
+      } catch {
+        setOpen(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function changeOpen(value: boolean) {

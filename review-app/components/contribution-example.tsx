@@ -34,9 +34,8 @@ export function ContributionExample() {
       <p className="contribute-eyebrow">
         Illustrative example · not a contributor’s session
       </p>
-      <div
+      <fieldset
         className="contribute-moments"
-        role="group"
         aria-label="Follow the session in order"
       >
         {moments.map((item, index) => (
@@ -51,7 +50,7 @@ export function ContributionExample() {
             <span>{item.text}</span>
           </button>
         ))}
-      </div>
+      </fieldset>
       <div className="contribute-lesson" aria-live="polite" aria-atomic="true">
         <p className="contribute-eyebrow">{moment.label}</p>
         <p>{moment.lesson}</p>

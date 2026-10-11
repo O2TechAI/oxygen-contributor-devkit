@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { ContributionExample } from '@/components/contribution-example';
 import './contribute.css';
 
@@ -17,16 +18,16 @@ export default function Contribute() {
   return (
     <main className="contribute">
       <nav aria-label="Contribution navigation" className="contribute-nav">
-        <a
+        <Link
           href="/contribute"
           aria-label="Oxygen contribution home"
           className="contribute-wordmark"
         >
           ✳ Oxygen
-        </a>
+        </Link>
         <div>
           <a href="#how">How it works</a>
-          <a href="/">Open review →</a>
+          <Link href="/">Open review →</Link>
         </div>
       </nav>
       <section className="contribute-hero">
@@ -51,9 +52,9 @@ export default function Contribute() {
           what deserves to travel further.
         </p>
         <div className="contribute-actions">
-          <a className="contribute-button" href="/">
+          <Link className="contribute-button" href="/">
             Review a trajectory →
-          </a>
+          </Link>
           <a href="#example">See one turning point ↓</a>
         </div>
         <p className="contribute-caption">
@@ -161,9 +162,9 @@ export default function Contribute() {
           A precise correction is a contribution. So is a thoughtful decline.
         </p>
         <div className="contribute-actions">
-          <a className="contribute-button" href="/">
+          <Link className="contribute-button" href="/">
             Open the review workspace →
-          </a>
+          </Link>
           <a href="https://github.com/O2TechAI/oxygen-contributor-devkit#launch-the-complete-pipeline-from-codex">
             Set up the devkit ↗
           </a>
