@@ -1,7 +1,7 @@
 import type { Insight, Review } from './review-types';
 import { classifySummaryLines } from './v5-format';
 
-// Fictional content for demonstrating Markdown, evidence links, and optional keys.
+// Fictional content for demonstrating v9 skill candidates, Markdown, and evidence links.
 const richSummary = `# Overview
 
 This synthetic example follows a review of a fictional library catalog export.
@@ -44,13 +44,27 @@ const insights: Insight[] = [
   {
     id: 'I001',
     sourceId: 'I001',
-    title: 'Preserve titles in reading-list exports',
-    presentKeys: ['title', 'type', 'scope', 'takeaway', 'evidence'],
-    type: 'user explicit',
-    scope: 'Reading-list exports in this fictional catalog review.',
-    takeaway:
-      'Check the exported list to confirm that each catalog title remains intact.',
-    evidence: [lineId('Keep catalog titles'), lineId('preserves titles')],
+    title: 'Export Fidelity Review',
+    presentKeys: [
+      'title',
+      'type',
+      'description',
+      'workflow',
+      'example',
+      'evidence',
+    ],
+    type: 'user-agent',
+    description:
+      'Check that exported content preserves source values. Use when transforming records for another surface.',
+    workflow:
+      '1. Identify values that must remain intact.\n2. Compare an export preview with the source.\n3. Record what was checked and leave unchecked cases open.',
+    example:
+      'In this fictional catalog review, the reviewer required intact titles. The proposed export preserved titles such as `A Sample Story`, and the reading-list preview was marked complete.',
+    evidence: [
+      lineId('Keep catalog titles'),
+      lineId('preserves titles'),
+      lineId('[x] Preview'),
+    ],
     text: '',
     originalText: '',
     status: 'pending',
@@ -58,25 +72,56 @@ const insights: Insight[] = [
   {
     id: 'I002',
     sourceId: 'I002',
-    title: 'Limit edits to approved catalog fields',
-    presentKeys: ['title', 'type', 'takeaway', 'evidence'],
-    type: 'user implicit',
-    takeaway:
-      'Preview bulk changes and limit them to the catalog fields the reviewer approved.',
-    evidence: [lineId('Limit catalog changes'), lineId('requested a preview')],
-    text: 'This card intentionally has no Scope key.',
+    title: 'Approved-Field Change Review',
+    presentKeys: [
+      'title',
+      'type',
+      'description',
+      'workflow',
+      'example',
+      'evidence',
+    ],
+    type: 'user-agent',
+    description:
+      'Constrain bulk edits to approved fields. Use when changes could affect records beyond the requested scope.',
+    workflow:
+      '1. List the approved fields.\n2. Check a change preview against that list.\n3. Obtain the required decision before applying changes outside the approved scope.',
+    example:
+      'The fictional catalog reviewer requested a preview before bulk changes and limited edits to approved fields. Catalog editing still needed a decision; the summary does not establish that changes were applied.',
+    evidence: [
+      lineId('Limit catalog changes'),
+      lineId('requested a preview'),
+      lineId('Only approved fields'),
+    ],
+    text: '',
     originalText: '',
     status: 'pending',
   },
   {
     id: 'I003',
     sourceId: 'I003',
-    title: 'Imported record sources remain unverified',
-    presentKeys: ['type', 'scope', 'evidence'],
-    type: 'agent encountered',
-    scope: 'The fictional catalog import in this example.',
-    evidence: [lineId('Check the source'), lineId('Record sources still')],
-    text: 'Source verification is still pending. This card intentionally has no Title or Takeaway key.',
+    title: 'Import Provenance Review',
+    presentKeys: [
+      'title',
+      'type',
+      'description',
+      'workflow',
+      'example',
+      'evidence',
+    ],
+    type: 'user-agent',
+    description:
+      'Identify source checks needed before relying on imported records. Use when import provenance has not been verified.',
+    workflow:
+      '1. Identify the source of imported records.\n2. Check the available source evidence.\n3. Keep unresolved verification visible.',
+    example:
+      'The fictional catalog review called for checking imported record sources. Verification remained an unchecked next step. This workflow is a proposed method, not a completed verification.',
+    evidence: [
+      lineId('Check the source'),
+      lineId('Record sources still'),
+      lineId('[ ] Verify'),
+    ],
+    text: '',
     originalText: '',
     status: 'pending',
   },
@@ -86,15 +131,15 @@ const generatedAt = '2026-01-01T00:00:00.000Z';
 
 export const sampleReviews: Review[] = [
   {
-    id: 'rich-summary-insight-keys-example',
-    projectName: 'Example · Rich Summary + Insight Keys',
-    sourcePath: 'example/rich-summary-insight-keys',
+    id: 'v9-skill-candidates-example',
+    projectName: 'Example · v9 Skill Candidates',
+    sourcePath: 'example/v9-skill-candidates',
     status: 'ready',
     generatedAt,
     updatedAt: generatedAt,
     revisionCount: 0,
     format: 'v5',
-    protocolVersion: 5,
+    protocolVersion: 9,
     stage: 'redaction',
     privacyStatus: 'redacted',
     provenance: {
