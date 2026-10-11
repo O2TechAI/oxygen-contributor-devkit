@@ -7,12 +7,14 @@ reviews remain readable and editable.
 ## Contributor invitation
 
 Open `/contribute` for the contribution story, a clearly labeled illustrative
-session, and links to the review workspace and setup. The review guide links to
-it in a new tab and offers an optional quality checklist, decided-card progress,
-and a shortcut to the next unresolved card. Accepted and declined cards both
-count as decided; this is review progress, not a skill evaluation score.
-These prompts do not collect questionnaire responses. See the
-[story and scope](../docs/contributor-story.md) for the Zihan / Zidi handoffs.
+session, and links to the review workspace and setup. Review help opens on first
+use and can be reopened with **Review help**. Dismissing it is remembered in
+this browser. The header shows `3/3 reviewed` beside **Complete**; accepted and
+declined cards both count. This is review progress, not an evaluation score.
+**Page information** contains the source, protocol, stage, verification, and model
+details. The privacy label remains visible in the header. Card prose is shown
+without a nested gray box. These prompts do not collect questionnaire responses.
+See the [story and scope](../docs/contributor-story.md) for the Zihan / Zidi handoffs.
 
 ## For reviewers: what is an insight?
 

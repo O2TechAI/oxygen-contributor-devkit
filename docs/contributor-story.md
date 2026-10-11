@@ -42,8 +42,9 @@ Oxygen 想留下的是这些可复用的方法，而不是更多聊天记录。
 
 - 先说明贡献的实际用途，再让人开始审阅；不用虚构影响人数或收益。
 - 使用现有 accepted / rejected 状态计算进度。拒绝同样计入完成，不奖励接受率。
-- 提供“下一张未处理卡片”入口，保留证据变更后需重新审阅的状态。
-- 把检查提示做成可展开短清单：过程顺序、迁移条件、真实结果、遗漏和隐私。
+- Complete 旁显示 `3/3 reviewed`，保留证据变更后需重新审阅的状态。
+- 首次使用打开引导，关闭后不再占据正文上方；通过 Review help 重开。
+  检查提示涵盖过程顺序、迁移条件、真实结果、遗漏和隐私。
   不设置无意义的强制勾选、计时锁、隐藏注意力题或虚构分数。
 - 未处理卡片、尚未应用的编辑和未完成保存不能表现成已经完成。
 - 保留现有 evidence、追加修订和导出机制；不引入新的采集端点或第三方分析。
@@ -59,8 +60,9 @@ Oxygen 想留下的是这些可复用的方法，而不是更多聊天记录。
 5. Research direction: new-task skill evaluation, explicitly not implemented here.
 6. CTA: open the existing review workspace or read setup instructions.
 
-The review guide links here in a new tab so an invitation/story does not discard
-an active review. The page does not read or display review data.
+The first-use Review help panel links here in a new tab so an invitation/story
+does not discard an active review. Source and protocol details live in Page
+information. The invitation page does not read or display review data.
 
 ## Scope and handoffs
 
@@ -76,8 +78,9 @@ an active review. The page does not read or display review data.
 
 - Open `/contribute` at mobile and desktop widths; all story sections and CTA
   links are usable. Selecting each example moment updates its explanation.
-- Open the existing workspace. Review prompts are available without mandatory
-  acknowledgements. Continue opens an unresolved card, including Evidence changed.
+- Open the existing workspace. First-use help can be dismissed and reopened;
+  refreshing remembers dismissal. Progress beside Complete counts accepted and
+  declined cards only; Evidence changed cards still require review.
 - Accept or decline a card: decided count changes, autosave reaches the real local
   SQLite backend, refresh restores the decision, and export retains it.
 - Apply/cancel open edits before completing. Existing redaction, evidence and
@@ -87,13 +90,16 @@ an active review. The page does not read or display review data.
 
 ## Verified locally
 
-- Existing review suite: 60 tests passed; TypeScript and production build passed.
+- Existing review suite plus the source-label regression check: 61 tests passed; TypeScript and production build passed.
 - Chromium: story selection and review links worked; no horizontal overflow at
   375, 768, or 1440 px on either page; no browser exceptions observed.
 - Using only the bundled synthetic review in the worktree's SQLite database:
   accept/decline updated progress, autosave persisted decisions across refresh,
   and `review.json` in the actual export preserved both decisions.
-- The next-card shortcut and expanded checklist worked. Opening an editor
+- The earlier next-card shortcut and expanded checklist worked. The compact
+  layout now uses first-use help with remembered dismissal and a Page information
+  panel. Chromium verified both panels, plain Takeaway prose, compact progress,
+  persistence after refresh, and 375/768/1440 px layouts. Opening an editor
   disabled Complete. Automated browser actions waited for React hydration.
 - This verifies the local path, not hosted deployment, contributor response,
   questionnaire collection, or skill performance on new tasks.

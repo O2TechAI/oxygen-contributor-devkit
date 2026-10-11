@@ -50,6 +50,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { RichSummary } from '@/components/rich-summary';
 import { ReviewGuide } from '@/components/review-guide';
+import { ReviewInfo } from '@/components/review-info';
 import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
 import { ImportReview } from '@/components/import-review';
 import { TrajectoryPanel } from '@/components/trajectory-panel';
@@ -1004,9 +1005,24 @@ export default function Home() {
             ))}
           </select>
           <Badge variant="secondary">{reviewStatusLabel(active.status)}</Badge>
+          {active.format === 'v5' && (
+            <Badge
+              variant="secondary"
+              className={active.privacyStatus === 'redacted'
+                ? 'bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]'
+                : 'bg-[#ffe2dd] text-[#5d1715]'}
+            >
+              {active.privacyStatus === 'redacted'
+                ? <ShieldCheck className="size-3" />
+                : <AlertTriangle className="size-3" />}
+              {active.privacyStatus === 'redacted' ? 'Redacted' : 'Unredacted'}
+            </Badge>
+          )}
         </div>
 
         <div className="flex max-w-full flex-wrap items-center gap-2">
+          <ReviewGuide review={active} />
+          <ReviewInfo review={active} />
           <ImportReview
             disabled={dirty || saveState === 'saving' || editorTarget !== null}
             onImported={openImportedReview}
@@ -1058,20 +1074,25 @@ export default function Home() {
               Retry autosave
             </Button>
           )}
-          <Button
-            disabled={saveState === 'saving' || editorTarget !== null || !completable}
-            title={
-              editorTarget !== null
-                ? 'Apply or cancel your edit before completing'
-                : completable
-                  ? 'Complete review'
-                  : 'Complete a redacted review after resolving every Insight'
-            }
-            onClick={() => persist('completed')}
-          >
-            <Check data-icon="inline-start" />
-            Complete
-          </Button>
+          <div className="flex items-center gap-2">
+            <span role="status" aria-label="Review progress" className="text-xs text-muted-foreground">
+              {active.insights.length - unresolved}/{active.insights.length} reviewed
+            </span>
+            <Button
+              disabled={saveState === 'saving' || editorTarget !== null || !completable}
+              title={
+                editorTarget !== null
+                  ? 'Apply or cancel your edit before completing'
+                  : completable
+                    ? 'Complete review'
+                    : 'Complete a redacted review after resolving every Insight'
+              }
+              onClick={() => persist('completed')}
+            >
+              <Check data-icon="inline-start" />
+              Complete
+            </Button>
+          </div>
           <Button
             variant="ghost"
             disabled={editorTarget !== null}
@@ -1082,61 +1103,6 @@ export default function Home() {
           </Button>
         </div>
       </header>
-
-      <ReviewGuide review={active} onNext={(id) => {
-        setSelectedInsight(id);
-        document.getElementById(`insight-${id}`)?.scrollIntoView({
-          behavior: 'smooth', block: 'start',
-        });
-      }} />
-      {active.format === 'v5' && (
-        <section className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 text-xs text-muted-foreground sm:px-5">
-          <span className="font-medium text-foreground">
-            Protocol v{active.protocolVersion}
-          </span>
-          <span className="capitalize">{active.stage} stage</span>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1.5 font-medium',
-              active.privacyStatus === 'redacted'
-                ? 'rounded-[3px] bg-[color:var(--type-explicit-bg)] px-1.5 py-0.5 text-[color:var(--type-explicit-strong)]'
-                : 'rounded-[3px] bg-[#ffe2dd] px-1.5 py-0.5 text-[#5d1715]',
-            )}
-          >
-            {active.privacyStatus === 'redacted' ? (
-              <ShieldCheck className="size-3.5" />
-            ) : (
-              <AlertTriangle className="size-3.5" />
-            )}
-            {active.privacyStatus === 'redacted' ? 'Redacted' : 'Unredacted'}
-          </span>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1.5',
-              !active.provenance.hashVerified && 'text-muted-foreground',
-            )}
-          >
-            {active.provenance.hashVerified ? (
-              <Check className="size-3.5" />
-            ) : (
-              <AlertTriangle className="size-3.5" />
-            )}
-            {active.provenance.hashVerified
-              ? 'Manifest hashes verified'
-              : 'Example data'}
-          </span>
-          {active.provenance.model && (
-            <span className="text-muted-foreground">
-              {active.provenance.model} · {active.provenance.reasoningEffort}
-            </span>
-          )}
-          <span className="ml-auto text-muted-foreground">
-            {unresolved
-              ? `${unresolved} Insight${unresolved === 1 ? '' : 's'} unresolved`
-              : 'All Insights resolved'}
-          </span>
-        </section>
-      )}
 
       <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
         <section
@@ -1786,7 +1752,7 @@ function InsightCard({
           <>
             {skillCandidate ? (
               <>
-                <div className="mt-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3">
+                <div className="mt-3">
                   <InsightKeyLabel>Description</InsightKeyLabel>
                   <InsightProse markdown={insight.description ?? ''} />
                 </div>
@@ -1804,7 +1770,7 @@ function InsightCard({
             ) : (
               <>
                 {keys.has('takeaway') && insight.takeaway && (
-                  <div className="mt-3 rounded-[4px] bg-[color:var(--ui-callout)] px-4 py-3">
+                  <div className="mt-3">
                     <InsightKeyLabel>Takeaway</InsightKeyLabel>
                     <InsightTakeaway markdown={insight.takeaway} />
                   </div>
