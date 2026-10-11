@@ -97,3 +97,141 @@ an active review. The page does not read or display review data.
   disabled Complete. Automated browser actions waited for React hydration.
 - This verifies the local path, not hosted deployment, contributor response,
   questionnaire collection, or skill performance on new tasks.
+
+## Live homepage copy — oxygen.o2tech.ai
+
+Target: <https://oxygen.o2tech.ai/>. This section is replacement copy for the
+live research homepage, which is separate from the devkit's `/contribute` page.
+The live page was read in Chromium. Its source/deployment is not configured in
+this checkout; the text below has not been published.
+
+### Editorial changes
+
+| Current wording | Replace with / reason |
+| --- | --- |
+| Human experience is the next scaling law. | Help AI agents learn from real work. Explain the project before introducing a research thesis. |
+| The project is the learning signal. | A project records what people tried, corrected, and learned. |
+| Your agent only learns 10% of your project signal. | Remove the percentage until a cited measurement supports it. |
+| The first benchmark for personalized continual learning… | Explain what is collected and tested; remove the priority claim unless supported. |
+| Trajectory | Project history on navigation; define trajectory once in research detail. |
+| Ground truth / externalize / no-context control | Contributor-written lessons / report what it learned / score without project history. Keep technical terms in scoring details. |
+| Bring your trajectory. Build the forest. | Contribute a project. Help test what agents learn. |
+
+Do not say the current benchmark measures changed behavior while the visible
+scoring section only describes matching extracted lessons. Separate the current
+measurement from the planned new-task skill evaluation.
+
+### Release notice
+
+Preview: we’re preparing Oxygen v0.1.
+
+Remove “within the next week” unless the team maintains a confirmed release date.
+Preserve the existing navigation destinations, with readable labels:
+Overview · Project histories · Evaluation · Results · Contribute.
+
+### Hero
+
+**Help AI agents learn from real work.**
+
+Oxygen is a research project that collects how people and AI agents work together:
+what they tried, what people corrected, and what happened next.
+We use these project histories to test what an agent can learn from experience.
+
+Primary action: **Explore a project**
+Secondary action: **Contribute a project**
+
+### Why project history matters
+
+**The final result leaves out many of the lessons.**
+
+A finished project shows what was built. Its history also shows why an approach
+failed, how a person redirected the agent, and which constraints changed the plan.
+Those decisions can be useful in future work.
+
+Illustrative example:
+A test passes locally but fails in CI. The user asks the agent to compare the
+environments before changing code. The agent discovers a timezone mismatch.
+The reusable lesson is to check environment differences when a failure only
+appears in CI. The order matters: the correction changes what the agent does next.
+
+This is an example, not a reported Oxygen evaluation result.
+
+### What Oxygen collects
+
+**Projects, with the decisions kept in order.**
+
+We are building a dataset of human–agent project histories. A history can include
+agent conversations, human feedback, decisions, attempts, and outcomes.
+Meeting notes and other project records can add context when available.
+
+Each reviewed contribution pairs the project history with lessons checked by
+someone who understands the work. The devkit currently supports recorded Codex
+and Claude Code sessions; other project material should not be presented as a
+supported automatic import without a verified collection path.
+
+### How to contribute
+
+**Start with one project you know well.**
+
+1. **Prepare the records.** Use the devkit with supported sessions from your project.
+2. **Check the summary and lessons.** Correct mistakes, decline weak candidates,
+   and add important missing context. Preserve the order of attempts and feedback.
+3. **Check sensitive information.** Review the redacted files yourself before sharing.
+4. **Export your reviewed contribution.** Export produces files; it does not submit
+   them to the Oxygen team. Use the team’s actual submission channel when available.
+
+Automated redaction can miss details. The preparation workflow uses model workers
+on your chosen host; check its data handling before processing private records.
+Replace “Nothing is uploaded until…” with this description of the actual boundary.
+
+Primary action: **Open the contributor guide**
+
+### How evaluation works
+
+**What can an agent learn from a project?**
+
+The current evaluation described on this site has three steps:
+
+1. **Read the project history.** A learning method receives the records, but not
+   the contributor-written reference lessons.
+2. **Report what it learned.** Every method is asked for its reusable lessons in
+   the same format, including when each lesson applies.
+3. **Compare the lessons.** We compare its answers with the contributor-written
+   references and with answers produced without the project history.
+
+This checks whether a method recovers the recorded lessons. It does not yet show
+that the method can apply those lessons successfully to a new task.
+Our next evaluation goal is to test that application, including skills that depend
+on several decisions or corrections happening in sequence.
+
+Expandable scoring detail:
+Precision asks how many reported lessons are supported by the references.
+Recall asks how many reference lessons were recovered. F1 combines the two.
+The “without project history” comparison helps identify what the model already
+knows. Confirm the matching rules with the evaluation team before publication.
+
+### Results
+
+**Evaluation results will appear here.**
+
+The current table contains method names with pending scores. Show “Not yet
+reported” for those entries and avoid presenting the table as a performance ranking.
+When results are available, show the score with and without project history together.
+
+### Ways to help
+
+**Contribute your experience. Test your method. Build the tools.**
+
+- **Contribute a project.** Review a project history and help us capture its useful
+  lessons accurately. Start with work you understand.
+- **Test a learning method.** Compare what it learns from project records with
+  lessons checked by the people who did the work.
+- **Build the tools.** Help improve collection, redaction, review, and evaluation.
+
+Closing:
+**Help keep the decisions behind the work.**
+Your corrections and failed attempts contain lessons a final answer cannot show.
+Start with one project and help us make those lessons useful for future agents.
+
+Actions: **Contribute a project** · **Contact the team**.
+Keep working destinations; do not add an upload button without an actual submission path.
