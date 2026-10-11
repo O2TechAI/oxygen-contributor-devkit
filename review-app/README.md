@@ -4,6 +4,18 @@ Oxygen Review is the contributor approval surface for readable Summary and
 Insight artifacts with Python-generated evidence labels. Historical grouped
 reviews remain readable and editable.
 
+## Contributor invitation
+
+Visit the [Oxygen homepage](https://oxygen.o2tech.ai/) for the contribution story
+and ways to participate. Review help links there in a new tab, opens on first
+use and can be reopened with **Review help**. Dismissing it is remembered in
+this browser. The header shows `3/3 reviewed` beside **Complete**; accepted and
+declined cards both count. This is review progress, not an evaluation score.
+**Page information** contains the source, protocol, stage, verification, and model
+details. The privacy label remains visible in the header. Card prose is shown
+without a nested gray box. These prompts do not collect questionnaire responses.
+See the [story and scope](../docs/contributor-story.md) for the Zihan / Zidi handoffs.
+
 ## For reviewers: what is an insight?
 
 Protocol v9 cards describe potential reusable skills worth developing for other
@@ -57,8 +69,8 @@ npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
 Open `http://127.0.0.1:3000`. Local development uses an isolated project-local
-D1 database through Miniflare. Bundled example reviews are inserted on first
-database access; existing imports are preserved. For the complete collection,
+D1 database through Miniflare. The bundled v9 skill-candidate example is inserted on first
+database access; existing imports and older examples are preserved. For the complete collection,
 generation, and local import workflow, use the [launch instruction](../readme.md#launch-the-complete-pipeline-from-codex).
 
 ### Local Node runtime
