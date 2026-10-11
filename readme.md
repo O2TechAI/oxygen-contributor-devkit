@@ -71,7 +71,7 @@ and local database state live under the toolkit's `review-app/` directory.
 
 ## Repository layout
 
-The collection and stripping steps are standalone Python tools; the agent workflow is the remaining skill:
+The collection and stripping steps are standalone Python tools; skills handle the agent workflows:
 
 - `prompts/summary.md` — readable thematic summaries grounded in the source.
 - `prompts/insight.md` and `prompts/insight-card-format.md` — summary corrections,
@@ -82,7 +82,19 @@ The collection and stripping steps are standalone Python tools; the agent workfl
   and the Claude Code variants (`collect_claude_sessions.py`,
   `strip_claude_tool_outputs.py`, `claude_trajectory_markdown.py`).
 - `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, and privacy-redaction workers.
+- `skills/oxygen-cross-session-generation/` — infer shared reusable skill candidates from completed review exports.
 - `review-app/` — the Oxygen human-review service and evidence-linked review UI.
+
+### Generate cross-session candidates after review
+
+After labeling and exporting a collection, use the
+[cross-session generation skill](skills/oxygen-cross-session-generation/SKILL.md)
+with its extracted export directory. It reads final edited summaries and both
+accepted and declined cards, validates completed labeling, and launches one fresh
+`gpt-6.1-sol` worker with high reasoning. Each new candidate needs concrete support
+from at least two distinct trajectories. Results are private drafts with qualified
+summary citations and source decisions; they require a new human review and do
+not modify existing reviews or create installable skills.
 
 ## 1. Collect workspace sessions
 
