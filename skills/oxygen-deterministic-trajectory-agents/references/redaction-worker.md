@@ -21,9 +21,10 @@ labeling algorithm or manually write the labels. Executing that helper is allowe
 reading unrelated repository files is not. The redaction directory exists.
 
 Then create RUN_DIR/redaction/insight_redacted.md with mode 0600 using the appended
-card format, preserving brief descriptions, abstract workflows, examples of recorded application, rich Markdown,
-and origin type labels, selecting evidence IDs from the final redacted
-summary. Write only the Markdown files; the parent validates their fields,
+card format. Preserve the existing Description, Workflow, and Example except for
+required privacy edits or local repairs to their support. Keep safe wording, rich
+Markdown, and exact origin type labels, and select evidence IDs from the final
+redacted summary. Write only the Markdown files; the parent validates their fields,
 citation targets, and integrity.
 You may read your three output files to validate them. If your readable
 summary needs another edit, remove only your derived labeled output, rerun the
