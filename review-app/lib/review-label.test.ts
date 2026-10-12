@@ -80,3 +80,20 @@ void test('uses meaningful headings and avoids repeating existing trajectory lab
   );
   assert.match(labels.get('project')!, /^example-project · Redacted/);
 });
+
+void test('keeps source paths out of page labels while distinguishing duplicate titles', () => {
+  const base = {
+    projectName: 'Example',
+    summaryLines: classifySummaryLines('# Catalog review\n'),
+    privacyStatus: 'redacted',
+  } as Review;
+  const labels = reviewLabels([
+    { ...base, id: 'first', sourcePath: '/private/fixtures/first.json' },
+    { ...base, id: 'second', sourcePath: '/private/fixtures/second.json' },
+  ]);
+  assert.equal(new Set(labels.values()).size, 2);
+  for (const label of labels.values()) {
+    assert.match(label, /^Catalog review · Redacted/);
+    assert.doesNotMatch(label, /private|fixtures|json/);
+  }
+});

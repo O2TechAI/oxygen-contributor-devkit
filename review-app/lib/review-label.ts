@@ -24,7 +24,7 @@ export function reviewLabels(reviews: Review[]): Map<string, string> {
     const version = review.sourcePath.match(/(\d{8})T(\d{6})(\d*)Z/);
     const date = version
       ? `${version[1]} ${version[2].slice(0, 2)}:${version[2].slice(2, 4)}:${version[2].slice(4, 6)}`
-      : review.sourcePath;
+      : undefined;
     const stage =
       review.privacyStatus === 'redacted'
         ? 'Redacted'

@@ -1,0 +1,346 @@
+{
+  "replacements": [
+    [
+      "Preview build — <span style=\"color:#A9E3C6;\"><span data-long=\"\">Oxygen v0.1 will be officially released within the next week.</span><span data-short=\"\" style=\"display:none;\">Oxygen v0.1 ships next week.</span></span>",
+      "<span data-collab-scale=\"\">Collaborating with ~100 researchers · 40 ongoing projects</span><span data-collab-domains=\"\">Safety · Manufacturing · AI for Science · Electrical Engineering · Biomedical Engineering</span>",
+      1
+    ],
+    [
+      ">Human experience</span>",
+      ">Real projects.</span>",
+      1
+    ],
+    [
+      ">is the next</span>",
+      ">Human judgment.</span>",
+      1
+    ],
+    [
+      ">scaling law.</span>",
+      ">Agents that learn.</span>",
+      1
+    ],
+    [
+      "The project is the learning signal.",
+      "Help define how agents learn from experience.",
+      1
+    ],
+    [
+      ">the first</span>",
+      ">Oxygen</span>",
+      1
+    ],
+    [
+      "benchmark for <span data-phrase=",
+      "A dataset and benchmark for <span data-phrase=",
+      1
+    ],
+    [
+      "personalized continual learning",
+      "learning from real work.",
+      1
+    ],
+    [
+      " from complete, real-world project trajectories.",
+      " Turn your project’s decisions into reusable lessons.",
+      1
+    ],
+    [
+      "explore a trajectory",
+      "Start with one project",
+      1
+    ],
+    [
+      "href=\"#scene02\" style=\"display:inline-flex;",
+      "href=\"#s07\" style=\"display:inline-flex;",
+      1
+    ],
+    [
+      "Not whether an agent can replay the past. Whether the past changes its behaviour.",
+      "A correction changes the next action. Oxygen keeps that connection.",
+      1
+    ],
+    [
+      ">The name</div>",
+      ">Why the process matters</div>",
+      1
+    ],
+    [
+      "Oxygen is a benchmark for learning from real-world human–agent projects.",
+      "Real projects. Reviewed lessons. Evidence you can check.",
+      1
+    ],
+    [
+      "Real projects, real workflows",
+      "Real projects, in sequence",
+      1
+    ],
+    [
+      "Oxygen includes long-horizon, complex work traces recorded from the first meeting to the final outcome.",
+      "Follow the attempts, feedback, and decisions behind a project. See how one step changed the next and what the recorded outcome supports.",
+      1
+    ],
+    [
+      "Human experience, not just agent traces",
+      "Human judgment, preserved",
+      1
+    ],
+    [
+      "Oxygen traces include meetings that capture decisions, and human–agent sessions that capture execution, correction, and iteration.",
+      "You know which correction changed the direction and why an approach was abandoned. Your review turns recorded activity into credible research material.",
+      1
+    ],
+    [
+      "Safe, scalable collection",
+      "Lessons you can take with you",
+      1
+    ],
+    [
+      "Oxygen uses automated tools to filter high-value traces locally and remove sensitive information before anything is shared.",
+      "Get a readable summary and reusable skill candidates, linked to evidence. Correct the wording, keep useful lessons, and export files for future work.",
+      1
+    ],
+    [
+      "Evaluation: whether experience changes behavior",
+      "A benchmark you can shape",
+      1
+    ],
+    [
+      "Oxygen uses human-authored lessons to test whether project experience changes what an agent does next.",
+      "Help establish which lessons matter. Current scoring compares extracted lessons with reviewed references; the next goal is to test their use on new tasks.",
+      1
+    ],
+    [
+      "How we turn a project into an open dataset",
+      "How to start with your project",
+      1
+    ],
+    [
+      "You point Oxygen to the project.<br>Local agents prepare the data. You approve the final release.",
+      "Choose a project you know.<br>Review the lessons. Export what you want to keep.",
+      1
+    ],
+    [
+      "Point Oxygen to a repository, Claude or Codex histories, agent memory, exported chats, meeting notes, transcripts, or recordings.",
+      "Open the Contributor Devkit in a project with recorded Codex or Claude Code sessions. Follow its quick start to prepare a run.",
+      1
+    ],
+    [
+      "We find the conversations, meetings, memories, and files related to the project.",
+      "Gather the supported session records associated with your project. Other project records can provide additional context.",
+      1
+    ],
+    [
+      "We summarize the records and organize the important events into a chronological project timeline.",
+      "Read a summary of the important attempts, corrections, and decisions, with the order and recorded outcomes preserved.",
+      2
+    ],
+    [
+      "We mask low-level tool traces and remove credentials, personal identifiers, private infrastructure, and other sensitive information.",
+      "Prepare a redacted version, then check it for sensitive details yourself. Automated redaction can miss information.",
+      1
+    ],
+    [
+      "We surface uncertain or high-signal moments, show every proposed change as a diff, and let you delete, rewrite, or keep the content.",
+      "Check the summary and supporting evidence. Accept, edit, or decline each skill candidate, and add important context the system missed.",
+      1
+    ],
+    [
+      "We package only the data you approve into a sanitized, contribution-ready project dataset.",
+      "Export your reviewed files for your own use. Contact the Oxygen team to discuss including your project in the dataset.",
+      1
+    ],
+    [
+      "Nothing is uploaded until you review and approve the final export.",
+      "Review files before sharing. Preparation uses model workers on your chosen host; check its data handling before processing private records.",
+      1
+    ],
+    [
+      "How are agents evaluated on Oxygen datasets",
+      "What did the agent learn—and can it use it?",
+      1
+    ],
+    [
+      "Read the project. Write down what you learned.",
+      "Learn from a project. Test what carries forward.",
+      1
+    ],
+    [
+      "A learning method sees the complete project trajectory.",
+      "Each method reads the project history, including feedback and decisions.",
+      1
+    ],
+    [
+      "It never sees the human-authored ground truth.",
+      "It does not see the contributor-reviewed reference lessons.",
+      1
+    ],
+    [
+      "We compare what it learned with the lessons written by the people who completed the project.",
+      "Current scoring compares extracted lessons with those references. Our next goal is skill-level evaluation on new tasks, including methods learned through a sequence of corrections.",
+      1
+    ],
+    [
+      "Trajectory<br>Becomes<br>Landscape",
+      "Project<br>Experience<br>Over Time",
+      1
+    ],
+    [
+      "Learn · Externalize · Score",
+      "Learn · Report · Compare",
+      1
+    ],
+    [
+      ">Externalize</span>",
+      ">Report</span>",
+      1
+    ],
+    [
+      ">Score</span>",
+      ">Compare</span>",
+      1
+    ],
+    [
+      "The method learns the complete project trajectory.",
+      "The method processes the project records in its own way.",
+      1
+    ],
+    [
+      "The learning process is flexible, while the final outcome is constrained to be a verifiable checklist: what they learned, when it takes account.",
+      "It reports reusable lessons and when they apply. This makes different learning approaches easier to compare.",
+      1
+    ],
+    [
+      "One fixed prompt asks every method to list what should persist from the project.",
+      "A shared prompt asks each method to report what it learned.",
+      1
+    ],
+    [
+      "Whatever the method produces: a memory store, a skill file, or another representation, we convert it into the same final format.",
+      "Memories, skills, and other representations are expressed in a common format for evaluation.",
+      1
+    ],
+    [
+      "We compare the extracted lessons with the human-authored ground truth.",
+      "We compare reported lessons with the reviewed references.",
+      1
+    ],
+    [
+      "Results are reported with precision, recall, F1, and a no-context control.",
+      "Precision, recall, and F1 measure reference matching. A baseline without project history helps show what the model already knows.",
+      1
+    ],
+    [
+      "How are existing methods performing",
+      "Results and participating methods",
+      1
+    ],
+    [
+      "We evaluate existing memory, retrieval, skill-learning, and continual-learning methods on Oxygen v0.1.",
+      "Follow the evaluation of memory, retrieval, skill-learning, and continual-learning methods. The listed methods are awaiting reported scores.",
+      1
+    ],
+    [
+      "Oxygen v0.1 · Round 01 · Submissions Open",
+      "Oxygen v0.1 · Scores pending · Discuss a submission",
+      1
+    ],
+    [
+      "Every submission reports a no-context control next to its score, showing what the backbone can recover without reading the project.",
+      "Results will show scores with and without project history, so you can see what the experience adds. Pending entries are not a performance ranking.",
+      1
+    ],
+    [
+      "How can I contribute",
+      "Find your place in Oxygen",
+      1
+    ],
+    [
+      "Help build the first open collection of complete human–agent projects.",
+      "Bring a project you know deeply. Help define what agents should learn.",
+      1
+    ],
+    [
+      "Three Ways In",
+      "Three ways to participate",
+      1
+    ],
+    [
+      "Join the builders shaping how agents learn!",
+      "Take away useful lessons. Help shape the research.",
+      1
+    ],
+    [
+      "Point Oxygen to a real project: a repository, agent chats, meeting notes, or recordings.<br><br>Local agents will prepare everything for your review safely.",
+      "Get a readable summary and skill candidates from work you understand.<br><br>Open the devkit, review the evidence and sensitive details, then export your files. Contact us to discuss inclusion.",
+      1
+    ],
+    [
+      ">Contribute a project<span data-carrow=",
+      ">Open the quick start<span data-carrow=",
+      1
+    ],
+    [
+      "Get on the Leaderboard",
+      "Evaluate your method",
+      1
+    ],
+    [
+      "Submit your algorithm and test it against real-world project trajectories.<br><br>See how well it can learn from complex human–agent collaboration.",
+      "See which project lessons your learning method recovers and where it falls short.<br><br>Contact the team to discuss evaluation and help shape meaningful tests of learning.",
+      1
+    ],
+    [
+      ">Submit your algorithm<span data-carrow=",
+      ">Discuss evaluation<span data-carrow=",
+      1
+    ],
+    [
+      "Build open-source tools for data sanitization, local review, and evaluation.<br><br>Build the pipeline to turn messy projects into agent-learnable trajectories.",
+      "Help shape tools you can use in real projects.<br><br>Explore the open-source devkit and improve collection, redaction, review, or evaluation.",
+      1
+    ],
+    [
+      ">Build with us<span data-carrow=",
+      ">Explore the tools<span data-carrow=",
+      1
+    ],
+    [
+      "Pick Your Lane. Every Contribution Moves The Frontier Forward.",
+      "Start with a project, a method, or a tool. Bring the judgment only you can add.",
+      1
+    ],
+    [
+      "Human experience is the next scaling law",
+      "Help define what agents should learn from real work",
+      1
+    ],
+    [
+      "The work becomes experience.<br>The experience changes the agent.",
+      "Real experience.<br>Lessons worth carrying forward.",
+      1
+    ],
+    [
+      "The next generation of agents will learn from what we build together.",
+      "Your corrections and decisions can help build a stronger foundation for learning agents.",
+      1
+    ],
+    [
+      "Bring your trajectory.<br>Build the forest.",
+      "Start with one project.<br>Keep what it taught you.",
+      1
+    ],
+    [
+      "href=\"#s07\" style=\"padding:16px 32px; border-radius:999px; font-size:20px; color:#14271E; background:#F2F1EB;\">Upload a dataset →",
+      "href=\"https://github.com/O2TechAI/oxygen-contributor-devkit#launch-the-complete-pipeline-from-codex\" style=\"padding:16px 32px; border-radius:999px; font-size:20px; color:#14271E; background:#F2F1EB;\">Open the contributor guide →",
+      1
+    ],
+    [
+      "href=\"#s07\" style=\"padding:16px 32px; border-radius:999px; font-size:20px; color:#E7EAE5; border:1px solid rgba(231,234,229,.34);\">Join the community →",
+      "href=\"mailto:hello@o2tech.ai?subject=Oxygen%20project%20contribution\" style=\"padding:16px 32px; border-radius:999px; font-size:20px; color:#E7EAE5; border:1px solid rgba(231,234,229,.34);\">Discuss a project →",
+      1
+    ]
+  ],
+  "animated_sentence": "Projects record what people tried, where an approach failed, and how feedback changed the next decision. Human judgment shapes what agents learn.",
+  "animated_claim": "The important lessons happen between the attempt and result."
+}
