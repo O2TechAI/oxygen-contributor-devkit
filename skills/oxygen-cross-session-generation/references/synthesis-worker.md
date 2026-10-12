@@ -7,9 +7,18 @@ implementation workflows whose interacting steps solve a recurring problem.
 The value may come from remembering an established choice, not discovering a
 surprising principle. The collection need not describe one project.
 
+The audience is human. Human understanding is the highest editorial priority;
+follow **Readable cards** in the category reference to reduce information density.
+Select and explain the important ideas rather than retaining every available detail.
+The cards introduce useful methods; they need not be complete execution manuals.
+
 ## Read the evidence
 
-Read the frozen candidate-format and skill-creator guidance named in this prompt.
+Read the frozen candidate-format, category reference (`categoryInstructions`), and
+skill-creator guidance named in this prompt. The category examples are synthetic
+teaching data: their facts, user preferences, and evidence IDs cannot support
+generated cards. The scheduling demonstration likewise supplies style guidance,
+not factual authority for the current corpus.
 First measure the indexed summary and card file sizes and plan reads that fit both
 `exec_command` and the enclosing `functions.exec` output limits. Completely inspect
 every reviewed summary and edited card, including declined cards, through tool
@@ -30,7 +39,12 @@ Write only this run's output files and optional private notes. No subagents.
 ## Find recurring procedures
 
 Identify recurring tasks, the user's consequential choices, the steps connecting
-them, and the conditions under which those choices apply. Select either:
+them, and the conditions under which those choices apply. Use the category criteria
+to identify the central reusable contribution before selection; consult relevant
+demonstrations when drafting and recheck the criteria during final review. Categories
+overlap and are non-exhaustive, with no quota. A coherent procedure can cross category
+boundaries. Personalization can modify any category and is distinct from origin Type.
+Select either:
 
 - **Personalized workflows (primary):** procedures made useful by user requirements
   or development constraints that a generic assistant would otherwise miss.
@@ -59,22 +73,21 @@ When requirements change, explain the supported scope of the change; recency alo
 does not make a session-specific choice a global replacement. Retain unresolved
 conflicts rather than silently choosing one rule.
 
-Preserve available operational details needed to use the workflow: partition names,
-resource limits, commands, storage locations, validation criteria, and stop or
-approval conditions. Generalize incidental identifiers, not requirements that make
-the procedure useful. A past authorization describes that application; it does not
+Retain operational settings and conditions when they change the central decision
+or explain what makes the workflow useful. Secondary commands, paths, counts, and
+implementation variants may be omitted to make that method easier to understand.
+Keep defining user requirements and the qualifications needed for selected claims.
+A past authorization describes that application; it does not
 authorize new actions. Keep unavailable or redacted values absent. State a missing
 setting when it limits use, and exclude a candidate if the remaining procedure is
 only generic advice. Do not consult outside sources to fill the gap.
 
 Accepted cards indicate preference; summaries are the factual source. Read
 declined cards as screening feedback. Their ideas may contribute to a materially
-improved candidate supported independently by summaries, but record the declined
-origins and explain how the new method differs. Rejection reasons are unavailable;
-do not infer them. Include every card that materially inspired a candidate in its
-provenance, even when its summary evidence is also cited directly.
+improved candidate supported independently by summaries. Evaluate how the new
+method improves the declined idea. Rejection reasons are unavailable; do not infer them.
 
-## Write for someone using the workflow
+## Write for a human reader
 
 Follow the format contract for a recognizable task and context in Description,
 an actionable procedure in Workflow, and separately attributed applications in
@@ -83,12 +96,13 @@ between supported requirements and inferred recommendations; examples retain
 recorded actions and outcome status. Do not retrofit proposed steps into history
 or combine different histories into a fictitious case.
 
-Read each draft without the original project in mind. Can a technical reader tell
-when it applies, what to do, which choices are already established, and what still
-needs deciding? Use descriptive example headings, selective emphasis, and steps or
-tables where they clarify relationships. Explain necessary terms near their use.
-Keep material qualifications beside their claims and provenance bookkeeping in
-the sidecar or report. Remove repeated explanation before removing useful context.
+Apply the category reference's **Readable cards** guidance before checking evidence.
+Can someone new to the project comfortably follow the main idea and its reasoning?
+Give each step or paragraph one main job. Omit secondary detail that crowds the
+explanation, and narrow a card whose essential branches remain overwhelming.
+Keep material qualifications beside their claims. Show the clearest distinct
+applications needed to establish recurrence; additional application history
+can remain in the source material.
 
 Produce zero or more candidates with no count, length or formatting quota. Select
 for a usable recurring procedure and understandable evidence, not the number of
@@ -97,15 +111,9 @@ not require a candidate about its topic.
 
 ## Deliver
 
-Write the Markdown cards and provenance sidecar specified by the format contract.
-Also write `synthesis_report.md` covering the entire corpus, candidate rationale,
-which distinct situations support each workflow, considered-but-excluded themes,
-declined-card use or exclusion, contextual limits, and quality concerns. For each
-candidate explain whether its value is personalized or procedural, which choices
-are user requirements versus observed behavior or synthesis, and any missing
-operational details. These are editorial explanations, not new schema fields.
-Keep the report factual about coverage; no rejection explanations are available
-in this export. Every output is a draft awaiting human review.
+Write `cross_session_insights.md` using the format contract. Use category criteria
+and candidate selection reasoning to guide the cards without separate reporting.
+Every candidate is a draft awaiting human review.
 
 Write `completion.json` as `{"status":"complete","readingComplete":true}` only
 after all indexed files were fully displayed and read. Run the frozen helper's

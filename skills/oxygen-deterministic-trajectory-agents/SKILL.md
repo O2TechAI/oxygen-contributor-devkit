@@ -31,7 +31,9 @@ unchanged. Each stage gets a fresh worker. The generated prompt begins with host
 notes describing that host's file-reading tools and limits.
 
 Initialization saves the model settings, complete prompt templates, labeler, and
-card parser in the run. Later stages use those saved versions. Repository edits or
+card parser in the run. The insight template also embeds the shared
+[category criteria and examples](../../prompts/insight_categories.md), used for
+selection, drafting, and final review. Later stages use those saved versions. Repository edits or
 changes to the original input do not invalidate an initialized run. The input path
 selects the run; the generated task name and saved label-helper path derive from it.
 
@@ -59,14 +61,23 @@ Each insight card has sequential IDs and the six fields `Title`, `Type`, `Descri
 `Workflow`, `Example`, `Evidence`. Types `user-agent` and `agent` describe the
 candidate's origin. Description briefly states what the skill does and when it applies,
 following the skill-creator guidance supplied in the frozen card format. Workflow
-proposes the abstract method. Example shows a recorded application through tasks,
-roles, choices, and results understandable without the original project. Abstract
-the setting without inventing actions or outcomes; partial or failed applications
+proposes a useful procedure or decision rule with supported operational detail.
+Example shows a recorded application through tasks, roles, choices, and results
+understandable without the original session. Explain the setting without inventing
+actions or outcomes; partial or failed applications
 can qualify when informative. Evidence supports the application and method's origin, not every generalized
 recommendation. Description, Workflow, and Example support rich Markdown. Card and
 field delimiters inside fences are literal content; unclosed fences are rejected.
 An empty insight file is valid. Structural checks establish format and navigation;
 usefulness and factual fidelity remain worker editorial responsibilities.
+
+Single-session candidates need one recorded application; surprise, cross-project
+portability, and demonstrated recurrence are not required. Categories overlap and
+impose no quota. Personalization can shape any category; Type remains about origin.
+Category bookkeeping belongs in external assessments, not worker output files.
+Cards are written for people. The shared category reference's **Readable cards**
+guidance makes human understanding the highest editorial priority: reduce information
+density and omit secondary detail while retaining the method's defining choices.
 
 ## Run one input
 

@@ -1,4 +1,4 @@
-"""Parse cross-session draft cards and validate their recorded provenance.
+"""Parse cross-session draft cards and validate their summary citations.
 
 The checks here establish syntax, resolvable citations, and distinct trajectory
 identities. Whether those trajectories record independent applications of a
@@ -21,11 +21,6 @@ FIELD = re.compile(r"^([A-Za-z]+|Applies when):[ \t]*(.*)$")
 
 def _nonempty(value):
     return isinstance(value, str) and bool(value.strip())
-
-
-def _exact_keys(value, keys, reason):
-    if not isinstance(value, dict) or set(value) != set(keys):
-        raise ValueError(reason)
 
 
 def _opening_fence(line):
@@ -179,7 +174,6 @@ def parse_cards(data, sources):
 def serialize_cards(cards):
     """Render normalized cards as six-field Markdown, preserving block content.
 
-    Provenance enrichment is deliberately omitted from the Markdown artifact.
     Citation existence and trajectory identity need ``parse_cards`` with sources.
     """
     if not isinstance(cards, list):
@@ -215,115 +209,3 @@ def serialize_cards(cards):
     if _parse_markdown(markdown) != normalized:
         raise ValueError("card_content_changes_structure")
     return markdown
-
-
-def _origin_cards(source):
-    cards = source.get("cards", [])
-    if not isinstance(cards, list):
-        raise ValueError("invalid_source_cards")
-    index = {}
-    for card in cards:
-        if not isinstance(card, dict) or not _nonempty(card.get("id")):
-            raise ValueError("invalid_source_card")
-        if card["id"] in index:
-            raise ValueError("duplicate_source_card_id")
-        if card.get("decision") not in {"accepted", "rejected"}:
-            raise ValueError("invalid_source_card_decision")
-        index[card["id"]] = card
-    return index
-
-
-def validate_provenance(cards, metadata, sources):
-    """Validate worker rationale/mappings and enrich them from trusted inputs.
-
-    ``cardIds`` may be empty for summary-only support. A declined origin means
-    an explicitly selected source card whose recorded decision is ``rejected``;
-    relevance is never inferred from text or overlapping summary citations.
-    """
-    cards = parse_cards(serialize_cards(cards).encode("utf-8"), sources)
-    source_index = _source_index(sources)
-    _exact_keys(metadata, {"candidates"}, "invalid_provenance_metadata")
-    candidates = metadata["candidates"]
-    if not isinstance(candidates, list):
-        raise ValueError("invalid_provenance_candidates")
-    by_id = {}
-    for candidate in candidates:
-        _exact_keys(candidate, {"id", "rationale", "sources"}, "invalid_candidate_metadata")
-        if not _nonempty(candidate["id"]) or candidate["id"] in by_id:
-            raise ValueError("invalid_provenance_candidate_id")
-        if not _nonempty(candidate["rationale"]):
-            raise ValueError("missing_candidate_rationale")
-        if not isinstance(candidate["sources"], list):
-            raise ValueError("invalid_candidate_sources")
-        by_id[candidate["id"]] = candidate
-    if set(by_id) != {card["id"] for card in cards}:
-        raise ValueError("provenance_candidate_mismatch")
-
-    enriched = []
-    for card in cards:
-        candidate = by_id[card["id"]]
-        cited_sources = dict.fromkeys(ref.split(":")[0] for ref in card["evidence"])
-        mappings = {}
-        for mapping in candidate["sources"]:
-            _exact_keys(mapping, {"sourceId", "cardIds", "application", "declinedReuse"}, "invalid_source_mapping")
-            source_id = mapping["sourceId"]
-            if not isinstance(source_id, str) or source_id not in cited_sources or source_id in mappings:
-                raise ValueError("invalid_mapped_source")
-            if not _nonempty(mapping["application"]):
-                raise ValueError("missing_source_application")
-            card_ids = mapping["cardIds"]
-            if not isinstance(card_ids, list) or not all(_nonempty(identifier) for identifier in card_ids):
-                raise ValueError("invalid_origin_card_ids")
-            if len(set(card_ids)) != len(card_ids):
-                raise ValueError("duplicate_origin_card_id")
-            source = source_index[source_id][0]
-            origins = _origin_cards(source)
-            if not set(card_ids) <= origins.keys():
-                raise ValueError("unknown_origin_card")
-            declined = mapping["declinedReuse"]
-            if not isinstance(declined, list):
-                raise ValueError("invalid_declined_reuse")
-            declined_by_id = {}
-            for reuse in declined:
-                _exact_keys(reuse, {"cardId", "difference"}, "invalid_declined_reuse")
-                identifier = reuse["cardId"]
-                if not _nonempty(identifier) or identifier in declined_by_id:
-                    raise ValueError("invalid_declined_origin_id")
-                if not _nonempty(reuse["difference"]):
-                    raise ValueError("missing_declined_reuse_difference")
-                declined_by_id[identifier] = reuse["difference"].strip()
-            rejected = {identifier for identifier in card_ids if origins[identifier]["decision"] == "rejected"}
-            if set(declined_by_id) != rejected:
-                raise ValueError("declined_reuse_mismatch")
-            selected = []
-            for identifier in card_ids:
-                origin = origins[identifier]
-                selected.append({
-                    **origin,
-                    "currentId": origin.get("currentId", identifier),
-                    "originalId": origin.get("originalId"),
-                    "acceptedExportId": origin.get("acceptedExportId"),
-                    "authorship": origin.get("authorship"),
-                    "rejectionReason": origin.get("rejectionReason"),
-                })
-            mappings[source_id] = {
-                "sourceId": source_id,
-                "reviewId": source.get("reviewId"),
-                "trajectoryKey": source["trajectoryKey"],
-                "cardIds": list(card_ids),
-                "application": mapping["application"].strip(),
-                "declinedReuse": [
-                    {"cardId": identifier, "difference": declined_by_id[identifier]}
-                    for identifier in card_ids if identifier in declined_by_id
-                ],
-                "summaryCitations": [ref for ref in card["evidence"] if ref.split(":")[0] == source_id],
-                "cards": selected,
-            }
-        if set(mappings) != set(cited_sources):
-            raise ValueError("missing_cited_source_mapping")
-        enriched.append({
-            **card,
-            "rationale": candidate["rationale"].strip(),
-            "sources": [mappings[source_id] for source_id in cited_sources],
-        })
-    return enriched

@@ -12,15 +12,15 @@ import subprocess
 import sys
 
 sys.dont_write_bytecode = True
-from cross_cards import parse_cards, validate_provenance
+from cross_cards import parse_cards
 from review_exports import normalize_export
 
 MODEL = "gpt-6.1-sol"
 EFFORT = "high"
-FORMAT = "oxygen-cross-session-candidates/v1"
+FORMAT = "oxygen-cross-session-candidates/v2"
 SKILL = Path(__file__).resolve().parents[1]
-OUTPUTS = ("cross_session_insights.md", "candidate_provenance.json",
-           "synthesis_report.md", "completion.json")
+CATEGORY_REFERENCE = SKILL.parents[1] / "prompts" / "insight_categories.md"
+OUTPUTS = ("cross_session_insights.md", "completion.json")
 
 
 def now():
@@ -99,6 +99,13 @@ def prepare(input_dir, run):
         raise ValueError("run_exists: use a new timestamped directory")
     if run.resolve().is_relative_to(input_dir.resolve()):
         raise ValueError("run_inside_input")
+    try:
+        categories = regular(CATEGORY_REFERENCE)
+        if not categories.strip():
+            raise ValueError("empty_reference")
+        categories.decode("utf-8")
+    except (OSError, ValueError) as exc:
+        raise ValueError("category_reference_unavailable") from exc
     corpus = normalize_export(input_dir)
     if len(corpus["sources"]) < 2:
         raise ValueError("insufficient_distinct_trajectories: supply at least two completed trajectories")
@@ -121,6 +128,7 @@ def prepare(input_dir, run):
                 if src.is_file() and src.suffix in (".py", ".md", ".json", ".yaml"):
                     write(run / "protocol" / folder / src.name, regular(src))
         write(run / "protocol" / "SKILL.md", regular(SKILL / "SKILL.md"))
+        write(run / "protocol/references/insight_categories.md", categories)
         settings = {"model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none",
                     "format": FORMAT, "privacyStatus": "private-awaiting-review"}
         write(run / "config.json", settings)
@@ -145,6 +153,7 @@ def prepare(input_dir, run):
         prompt += "\n\n## This run\n\n" + json.dumps({
             "runDirectory": str(run), "index": str(run / "reading/index.json"),
             "formatInstructions": str(run / "protocol/references/candidate-format.md"),
+            "categoryInstructions": str(run / "protocol/references/insight_categories.md"),
             "skillCreatorGuidance": str(run / "protocol/references/skill-creator-guidance.md"),
             "readCommand": [sys.executable, str(helper), "read", str(run),
                             "--file", "PATH_FROM_INDEX", "--start", "BYTE_OFFSET",
@@ -283,20 +292,18 @@ def check(run):
     verify(run)
     corpus = load(run / "corpus.json")
     cards = parse_cards(regular(run / "cross_session_insights.md"), corpus["sources"])
-    enriched = validate_provenance(cards, load(run / "candidate_provenance.json"), corpus["sources"])
-    if not regular(run / "synthesis_report.md").decode("utf-8").strip():
-        raise ValueError("empty_synthesis_report")
     completion = load(run / "completion.json")
     if completion.get("status") != "complete" or completion.get("readingComplete") is not True:
         raise ValueError("worker_reading_incomplete")
     coverage = reading_coverage(run)
-    return enriched, {"status": "valid", "format": FORMAT, "candidateCount": len(cards),
+    return cards, {"status": "valid", "format": FORMAT, "candidateCount": len(cards),
                       "sourceCounts": corpus["counts"], "coverage": coverage,
                       "checks": ["frozen_hashes", "six_fields", "qualified_citations",
-                                 "distinct_trajectory_support", "origin_mappings", "declined_reuse",
+                                 "distinct_trajectory_support",
                                  "bounded_read_coverage", "worker_completion_attestation"],
                       "limitations": ["Read receipts establish requested coverage, not comprehension.",
-                                      "Semantic support, distinct episodes, and privacy need human review."]}
+                                      "Semantic support, distinct episodes, and privacy need human review.",
+                                      "Per-candidate source-card lineage and declined-reuse explanations are not structurally validated."]}
 
 
 def accept(run, worker_id, worker_status):

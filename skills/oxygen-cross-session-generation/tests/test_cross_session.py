@@ -42,21 +42,6 @@ Evidence: S001:L002, S002:L002
 """
 
 
-def metadata():
-    return {"candidates": [{
-        "id": "C001",
-        "rationale": "Two distinct recorded situations expose the same verification gap.",
-        "sources": [
-            {"sourceId": "S001", "cardIds": ["I003", "I002"],
-             "application": "Compare the accepted method with the declined framing.",
-             "declinedReuse": [{"cardId": "I002", "difference":
-                               "Use a method supported by two situations instead of an episode recap."}]},
-            {"sourceId": "S002", "cardIds": [],
-             "application": "Use the separate summary as factual corroboration.", "declinedReuse": []},
-        ],
-    }]}
-
-
 def snapshot(root):
     return {str(path.relative_to(root)): path.read_bytes()
             for path in root.rglob("*") if path.is_file()}
@@ -75,6 +60,12 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.skill_patch = mock.patch.object(CROSS, "SKILL", self.live_skill)
         self.skill_patch.start()
         self.addCleanup(self.skill_patch.stop)
+        self.category_reference = self.root / "shared-prompts/insight_categories.md"
+        self.category_reference.parent.mkdir()
+        self.category_reference.write_bytes(CROSS.CATEGORY_REFERENCE.read_bytes())
+        category_patch = mock.patch.object(CROSS, "CATEGORY_REFERENCE", self.category_reference)
+        category_patch.start()
+        self.addCleanup(category_patch.stop)
         self.reviews = []
         entries = []
         for suffix, episode in (("a", "The first episode had an unresolved verification step."),
@@ -98,11 +89,6 @@ class CrossSessionLifecycleTests(unittest.TestCase):
     def write_outputs(self, *, empty=False, completion=None):
         (self.run / "cross_session_insights.md").write_text(
             "" if empty else MARKDOWN, encoding="utf-8")
-        CROSS.write(self.run / "candidate_provenance.json",
-                    {"candidates": []} if empty else metadata())
-        (self.run / "synthesis_report.md").write_text(
-            "Both source summaries and all accepted and declined cards were considered.\n",
-            encoding="utf-8")
         CROSS.write(self.run / "completion.json", completion if completion is not None else
                     {"status": "complete", "readingComplete": True})
 
@@ -154,7 +140,7 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         settings = CROSS.load(self.run / "config.json")
         self.assertEqual(settings, {
             "model": "gpt-6.1-sol", "reasoning_effort": "high", "fork_turns": "none",
-            "format": "oxygen-cross-session-candidates/v1", "privacyStatus": "private-awaiting-review",
+            "format": "oxygen-cross-session-candidates/v2", "privacyStatus": "private-awaiting-review",
         })
         dispatch = CROSS.load(self.run / "dispatch.json")
         self.assertEqual({key: dispatch[key] for key in ("model", "reasoning_effort", "fork_turns")},
@@ -168,12 +154,45 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.assertEqual(runtime["index"], str(self.run / "reading/index.json"))
         self.assertTrue(Path(runtime["formatInstructions"]).is_file())
         self.assertTrue(Path(runtime["skillCreatorGuidance"]).is_file())
+        self.assertEqual(Path(runtime["categoryInstructions"]),
+                         self.run / "protocol/references/insight_categories.md")
+        self.assertEqual(Path(runtime["categoryInstructions"]).read_bytes(),
+                         self.category_reference.read_bytes())
         self.assertEqual(runtime["readCommand"], [
             sys.executable, str(self.run / "protocol/scripts/cross_session.py"),
             "read", str(self.run), "--file", "PATH_FROM_INDEX", "--start", "BYTE_OFFSET",
             "--limit", "BYTE_COUNT",
         ])
         self.assertIn(str(self.run / "protocol/worker-prompt.md"), dispatch["message"])
+
+    def test_category_reference_is_frozen_and_live_changes_do_not_affect_run(self):
+        self.prepare()
+        frozen = self.run / "protocol/references/insight_categories.md"
+        original = self.category_reference.read_bytes()
+        manifest = CROSS.load(self.run / "manifest.json")
+        self.assertEqual(manifest["frozenHashes"]["protocol/references/insight_categories.md"],
+                         hashlib.sha256(original).hexdigest())
+        self.category_reference.unlink()
+        CROSS.issue_call(self.run)
+        CROSS.verify(self.run)
+        self.assertEqual(frozen.read_bytes(), original)
+
+    def test_modified_frozen_categories_fail_verification(self):
+        self.prepare()
+        (self.run / "protocol/references/insight_categories.md").write_text("Changed criteria\n")
+        with self.assertRaisesRegex(ValueError, "frozen_file_changed"):
+            CROSS.verify(self.run)
+
+    def test_missing_or_invalid_categories_fail_before_run_creation(self):
+        for data in (None, b"", b"\xff"):
+            with self.subTest(data=data):
+                if data is None:
+                    self.category_reference.unlink(missing_ok=True)
+                else:
+                    self.category_reference.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, "category_reference_unavailable"):
+                    self.prepare()
+                self.assertFalse(self.run.exists())
 
     def test_insufficient_distinct_trajectories_is_rejected_before_creating_run(self):
         single = self.root / "single"
@@ -453,20 +472,26 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         before = snapshot(self.inputs)
         validation = self.accepted_run()
         result = CROSS.load(self.run / "cross_session_insights.json")
-        self.assertEqual(result["format"], "oxygen-cross-session-candidates/v1")
+        self.assertEqual(result["format"], "oxygen-cross-session-candidates/v2")
         self.assertEqual((result["status"], result["privacyStatus"]),
                          ("draft", "private-awaiting-review"))
         candidate = result["candidates"][0]
         self.assertEqual(candidate["status"], "draft")
         self.assertEqual(candidate["evidence"], ["S001:L002", "S002:L002"])
-        accepted, rejected = candidate["sources"][0]["cards"]
+        self.assertEqual(set(candidate), {
+            "id", "title", "type", "description", "workflow", "example", "evidence", "status",
+        })
+        accepted = next(card for card in result["sources"][0]["cards"] if card["id"] == "I003")
+        rejected = next(card for card in result["sources"][0]["cards"] if card["id"] == "I002")
         self.assertEqual((accepted["currentId"], accepted["originalId"], accepted["acceptedExportId"]),
                          ("I003", "I006", "I002"))
         self.assertEqual(accepted["decision"], "accepted")
         self.assertEqual(rejected["decision"], "rejected")
         self.assertIsNone(rejected["acceptedExportId"])
         self.assertIsNone(rejected["rejectionReason"])
-        self.assertEqual(candidate["sources"][1]["cards"], [])
+        self.assertFalse((self.run / "candidate_provenance.json").exists())
+        self.assertNotIn("origin_mappings", validation["checks"])
+        self.assertNotIn("declined_reuse", validation["checks"])
         self.assertEqual(result["sources"], CROSS.load(self.run / "corpus.json")["sources"])
         self.assertEqual(validation["candidateCount"], 1)
         self.assertEqual(len(validation["coverage"]), 4)
@@ -481,8 +506,70 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         result = CROSS.load(self.run / "cross_session_insights.json")
         self.assertEqual(validation["candidateCount"], 0)
         self.assertEqual(result["candidates"], [])
+        self.assertFalse((self.run / "candidate_provenance.json").exists())
+        self.assertFalse((self.run / "synthesis_report.md").exists())
         self.assertEqual(result["status"], "draft")
         self.assertEqual(result["privacyStatus"], "private-awaiting-review")
+
+    def test_cli_checks_and_accepts_drafts_without_a_sidecar_or_report(self):
+        self.start_worker()
+        self.read_all()
+        self.write_outputs()
+        for command in (
+            ["check", str(self.run)],
+            ["accept", str(self.run), "--worker-id", "test-worker-no-model-launched",
+             "--worker-status", "complete"],
+            ["verify", str(self.run), "--check-originals"],
+        ):
+            completed = subprocess.run([sys.executable, str(SCRIPT), *command],
+                                       capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertFalse((self.run / "candidate_provenance.json").exists())
+        self.assertFalse((self.run / "synthesis_report.md").exists())
+        output_hashes = CROSS.load(self.run / "state.json")["outputHashes"]
+        self.assertNotIn("candidate_provenance.json", output_hashes)
+        self.assertNotIn("synthesis_report.md", output_hashes)
+        result = CROSS.load(self.run / "cross_session_insights.json")
+        self.assertEqual(result["format"], "oxygen-cross-session-candidates/v2")
+        self.assertEqual(result["candidates"][0]["evidence"], ["S001:L002", "S002:L002"])
+
+    def test_live_cli_preserves_a_frozen_sidecar_requirement(self):
+        # Simulate an earlier output contract without depending on real run files.
+        helper = self.live_skill / "scripts/cross_session.py"
+        legacy = helper.read_text().replace(
+            'FORMAT = "oxygen-cross-session-candidates/v2"',
+            'FORMAT = "oxygen-cross-session-candidates/v1"',
+        ).replace(
+            'OUTPUTS = ("cross_session_insights.md",',
+            'OUTPUTS = ("candidate_provenance.json", "cross_session_insights.md",',
+        ).replace(
+            'def check(run):\n    verify(run)',
+            'def check(run):\n    verify(run)\n    load(run / "candidate_provenance.json")',
+        )
+        helper.write_text(legacy)
+        with mock.patch.object(CROSS, "FORMAT", "oxygen-cross-session-candidates/v1"):
+            self.start_worker()
+        self.read_all()
+        self.write_outputs()
+        frozen_before = snapshot(self.run / "protocol")
+        checked = subprocess.run([sys.executable, str(SCRIPT), "check", str(self.run)],
+                                 capture_output=True, text=True, check=False)
+        self.assertEqual(checked.returncode, 1)
+        self.assertIn("candidate_provenance.json", checked.stderr)
+        CROSS.write(self.run / "candidate_provenance.json", {"candidates": []})
+        accepted = subprocess.run([
+            sys.executable, str(SCRIPT), "accept", str(self.run), "--worker-id",
+            "test-worker-no-model-launched", "--worker-status", "complete",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(json.loads(accepted.stdout)["format"], "oxygen-cross-session-candidates/v1")
+        self.assertIn("candidate_provenance.json", CROSS.load(self.run / "state.json")["outputHashes"])
+        self.assertEqual(snapshot(self.run / "protocol"), frozen_before)
+        (self.run / "candidate_provenance.json").write_text("changed")
+        verified = subprocess.run([sys.executable, str(SCRIPT), "verify", str(self.run)],
+                                  capture_output=True, text=True, check=False)
+        self.assertEqual(verified.returncode, 1)
+        self.assertIn("accepted_output_changed: candidate_provenance.json", verified.stderr)
 
     def test_invalid_candidate_content_marks_acceptance_failed(self):
         self.start_worker()
@@ -495,13 +582,36 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.assertEqual(CROSS.load(self.run / "validation.json")["status"], "failed")
         self.assertEqual(CROSS.load(self.run / "state.json")["status"], "failed")
 
-    def test_empty_synthesis_report_is_rejected(self):
+    def test_live_cli_preserves_a_frozen_report_requirement(self):
+        # Earlier runs keep their report requirement through the frozen helper.
+        helper = self.live_skill / "scripts/cross_session.py"
+        legacy = helper.read_text().replace(
+            'OUTPUTS = ("cross_session_insights.md",',
+            'OUTPUTS = ("synthesis_report.md", "cross_session_insights.md",',
+        ).replace(
+            'def check(run):\n    verify(run)',
+            'def check(run):\n    verify(run)\n'
+            '    if not regular(run / "synthesis_report.md").decode("utf-8").strip():\n'
+            '        raise ValueError("empty_synthesis_report")',
+        )
+        helper.write_text(legacy)
         self.start_worker()
         self.read_all()
         self.write_outputs()
-        (self.run / "synthesis_report.md").write_text(" \n")
-        with self.assertRaisesRegex(ValueError, "empty_synthesis_report"):
-            self.accept()
+        for contents, error in ((None, "not_regular_file"), (" \n", "empty_synthesis_report")):
+            if contents is not None:
+                (self.run / "synthesis_report.md").write_text(contents)
+            checked = subprocess.run([sys.executable, str(SCRIPT), "check", str(self.run)],
+                                     capture_output=True, text=True, check=False)
+            self.assertEqual(checked.returncode, 1)
+            self.assertIn(error, checked.stderr)
+        (self.run / "synthesis_report.md").write_text("Historical synthesis report.\n")
+        accepted = subprocess.run([
+            sys.executable, str(SCRIPT), "accept", str(self.run), "--worker-id",
+            "test-worker-no-model-launched", "--worker-status", "complete",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("synthesis_report.md", CROSS.load(self.run / "state.json")["outputHashes"])
 
     def test_original_export_changes_do_not_replace_frozen_evidence(self):
         self.prepare()

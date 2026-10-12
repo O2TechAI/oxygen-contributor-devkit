@@ -14,8 +14,18 @@ them reusable. A surprising discovery is not required. Each candidate needs dist
 recorded applications in at least two trajectories; separate sessions of one project
 qualify, while cross-project transfer is claimed only when demonstrated.
 
+Use the shared [category criteria and examples](../../prompts/insight_categories.md)
+to identify each candidate's central reusable contribution. Preparation freezes
+this reference and supplies its path as `categoryInstructions`; workers use that
+copy for selection, drafting, and final review. Categories overlap and impose no
+quota. Use categories to guide reasoning; category labels are not output fields.
+The synthetic demonstrations cannot supply production facts or citations.
+The reference's **Readable cards** section makes human understanding the highest
+editorial priority. Reduce information density and omit secondary details so a
+person can comfortably follow the central method and its defining requirements.
+
 The helper validates completed protocol-v9 exports, freezes the actual human edits,
-and keeps generation separate from parsing and provenance. It does not modify the
+and keeps generation separate from parsing and evidence validation. It does not modify the
 input, run redaction, publish results, or alter the review app. Draft candidates
 require new human review regardless of their sources' decisions.
 
@@ -68,12 +78,14 @@ Use only this corpus; keep removed identities and unavailable raw history absent
 ## Review the result
 
 The [format contract](references/candidate-format.md) defines six fields with
-qualified citations and separate per-candidate provenance. New artifacts use
-`oxygen-cross-session-candidates/v1`, independently of protocol v9.
+qualified citations. New artifacts use `oxygen-cross-session-candidates/v2`,
+independently of source protocol v9. Candidate JSON contains the six fields, ID,
+and draft status; the top-level source catalog retains input review decisions.
+Per-candidate source-card mappings are no longer required or generated.
+Earlier runs retain their saved instructions, helpers, and output requirements.
 
-The worker writes `cross_session_insights.md`, `candidate_provenance.json`,
-`synthesis_report.md`, and `completion.json`. Acceptance produces
-`cross_session_insights.json` and `validation.json`. The run also retains frozen
+The worker writes `cross_session_insights.md` and `completion.json`. Acceptance
+produces `cross_session_insights.json` and `validation.json`. The run also retains frozen
 inputs, guidance, helpers, hashes, bounded-read records, and the dispatch/worker ID.
 Workers measure file sizes and choose `read --limit` byte counts to fit the host's
 tool-output budgets; the helper imposes no fixed default or maximum chunk size.
@@ -82,18 +94,13 @@ truncated portions with smaller reads.
 Read receipts establish requested byte coverage, not semantic comprehension;
 the parent completion attestation depends on the host's actual final result.
 
-For a new implementation or an explicitly requested trial, have an independent
-agent assess every candidate in two passes. First read the cards without source
-context: can a technical reader identify the task, follow the procedure, locate
-the important choices, and avoid asking the user to repeat established requirements?
-Then check the exported summaries for distinct applications, supported operational
-details, defaults versus exceptions, user requirements versus agent choices, actual
-outcome status, and transparent declined origins. Use the selection criteria in the
-frozen worker instructions; do not prescribe candidate themes or a desired count.
+Readability review is part of the synthesis worker's drafting and final review.
+The worker reads each card without relying on source
+context, removes secondary detail that crowds the explanation, and revises until
+the central method and its defining requirements are understandable. It then checks
+distinct applications, factual support, scope, attribution, and outcome status
+against the frozen evidence and resolves quality concerns in the cards before finishing.
 
-When comparing revisions, give the assessor the baseline only after its initial
-assessment. Compare specificity, usefulness, readability and factual support, and
-record missing operational details; shorter cards or more cards alone are not
-improvements. Keep the assessment with the run. Report counts, failures, coverage,
+Report counts, failures, coverage,
 supporting trajectories, quality concerns and artifact paths; structural acceptance
 is not factual or privacy approval.

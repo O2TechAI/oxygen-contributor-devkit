@@ -1,4 +1,4 @@
-# Cross-session candidates v1
+# Cross-session candidates v2
 
 Use sequential `# C001`, `# C002`, … with exactly these six fields in order:
 `Title`, `Type`, `Description`, `Workflow`, `Example`, `Evidence`.
@@ -17,13 +17,14 @@ Use sequential `# C001`, `# C002`, … with exactly these six fields in order:
   and outcome. Explain what each application contributes instead of repeating the
   full workflow. Preserve whether outcomes were observed, reported or unresolved.
 - **Evidence:** Cite the frozen summary content supporting requirements and factual
-  applications. Source references and provenance provide navigation, not explanation.
+  applications. Source references provide navigation, not explanation.
 
-Write for a technical reader unfamiliar with the project. Use short paragraphs,
-selective bold emphasis, steps for sequences and compact tables for alternatives
-when helpful. There is no mandatory internal layout or step count. Keep important
-qualifications beside their claims; put additional audit history in the sidecar or
-synthesis report. Remove unnecessary reading while retaining necessary explanation.
+Write for a human unfamiliar with the project. Human understanding takes priority
+over exhaustive detail: follow **Readable cards** in the frozen category reference.
+Keep the central method and its defining requirements easy to follow; secondary
+detail may be omitted. Use paragraphs, steps or tables to reduce reading effort,
+with no mandatory layout or step count. Keep important qualifications beside their
+claims; secondary application and audit history can remain in the source material.
 When a procedure includes a calculation, define each symbol and condition where
 the formula appears, and state what is transformed or averaged in which order.
 Expand unfamiliar abbreviations on first use. A reader should be able to apply
@@ -32,9 +33,9 @@ the calculation without recovering its definitions from the source session.
 ## Worked demonstration
 
 This example is adapted from recorded scheduling history. It demonstrates the
-specificity and presentation to aim for, not a required topic. Its source IDs and
+specificity to aim for, not a detail-density target or required topic. Its source IDs and
 citations belong to the demonstration corpus; use only the current supplied corpus
-for actual candidates, citations and provenance. The same campaign includes
+for actual candidates and citations. The same campaign includes
 distinct scheduling interventions, not demonstrated reuse across projects.
 
 ```markdown
@@ -121,45 +122,8 @@ possible future use of a proposed Workflow. Proposed extensions remain identifia
 as proposals, and unsupported settings remain unspecified. Actual Examples cannot
 include illustrative events that did not occur.
 
-## Provenance sidecar
-
-Save `candidate_provenance.json` alongside the Markdown:
-
-```json
-{
-  "candidates": [
-    {
-      "id": "C001",
-      "rationale": "Why these distinct applications support a useful personalized or detailed implementation workflow.",
-      "sources": [
-        {
-          "sourceId": "S001",
-          "cardIds": ["I002"],
-          "application": "The specific recorded situation contributing support.",
-          "declinedReuse": []
-        },
-        {
-          "sourceId": "S002",
-          "cardIds": ["I003"],
-          "application": "A distinct situation and what it contributes.",
-          "declinedReuse": [
-            {"cardId": "I003", "difference": "How this materially improves the declined idea, without assuming its rejection reason."}
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-Use actual current IDs from the indexed cards, including every materially used
-origin. `cardIds: []` is allowed for summary-only support. Provide one source
-mapping per cited source, and one declinedReuse explanation per listed declined
-card. The validator derives review IDs, original/current/accepted-export card IDs,
-decisions, summary citations and null rejection reasons from the frozen corpus;
-do not invent these in the sidecar. For no candidates use `{"candidates":[]}`.
-
-The final JSON uses `oxygen-cross-session-candidates/v1`; all candidates have
+The helper produces `oxygen-cross-session-candidates/v2` JSON from the Markdown.
+Each candidate contains its ID and six fields; all candidates have
 `status: "draft"`. This format does not change source protocol v9 or imply review
 approval. These artifacts are private candidates pending human review, not a
 review-app import or installable skills.

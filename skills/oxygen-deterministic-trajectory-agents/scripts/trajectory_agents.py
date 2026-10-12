@@ -45,6 +45,7 @@ STAGES = {
     )),
 }
 CARD_FORMAT = KIT / "prompts" / "insight-card-format.md"
+CATEGORY_REFERENCE = KIT / "prompts" / "insight_categories.md"
 CARD_SCRIPT = SKILL / "scripts" / "insight_cards.py"
 CARD_SPEC = importlib.util.spec_from_file_location("oxygen_insight_cards", CARD_SCRIPT)
 CARDS = importlib.util.module_from_spec(CARD_SPEC)
@@ -102,6 +103,15 @@ def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex"):
     helper = b""
     if stage in {"insight", "redaction"}:
         helper = b"\n" + CARD_FORMAT.read_bytes()
+        if stage == "insight":
+            try:
+                categories = read_regular(CATEGORY_REFERENCE)
+                if not categories.strip():
+                    raise ValueError("empty_reference")
+                categories.decode("utf-8")
+            except (OSError, ValueError) as exc:
+                raise RunError("category_reference_unavailable") from exc
+            helper += b"\n\n" + categories
         helper += b"\n# Label helper command (JSON argv prefix)\n" + encode([sys.executable, str(label_script)])
     return wrapper + b"\n" + prompt + helper + b"\n\n# Per-item input (JSON data)\n"
 

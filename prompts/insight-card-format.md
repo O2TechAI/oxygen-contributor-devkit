@@ -12,7 +12,7 @@ The following relevant guidance is supplied directly from the installed skill-cr
 >
 > Write only the instructions needed for another Codex instance to perform the task well. State the desired outcome, non-obvious context, real constraints, and relevant references or tools. Preserve the user's explicit choices and existing authorization boundaries. Avoid prescribing a fixed structure, process, or number of steps when the task does not require one.
 
-For these candidate cards, Description serves that catalog role. Workflow contains the abstract method, and Example shows a recorded application in a setting understandable without the original project. The cards are proposals for future skills, not completed executable skills.
+For these candidate cards, Description serves that catalog role. Workflow contains the useful procedure or decision rule, and Example shows a recorded application with enough context for an unfamiliar reader. The cards are proposals for future skills, not completed executable skills.
 
 ## Demonstration
 
@@ -50,12 +50,14 @@ Evidence: L029, L031, L033
 ## Field guidance
 
 - **Title:** Name a capability useful for a recurring project task.
-- **Description:** Briefly state what the skill does and when it applies. Include a boundary only when useful for distinguishing similar requests.
-- **Workflow:** Explain the proposed reusable approach through its consequential actions, decisions, and essential constraints. Generalize incidental project details. Choose paragraphs or steps to suit the method; no mandatory structure or step count.
-- **Example:** Show how the method was applied in a recorded situation. Abstract the setting into understandable tasks, roles, and constraints, and explain consequential choices and results. Retain discovery history only when it clarifies the application. Preserve attribution and outcome status; simplifying the setting must not invent actions or success, or turn proposed Workflow steps into historical claims. Partial and failed applications can qualify; scenarios that did not occur cannot.
+- **Description:** State the recognizable task, relevant context, and reason to use the method. Include a boundary when useful for distinguishing similar requests; universal applicability is unnecessary.
+- **Workflow:** Connect consequential actions, decisions, supported settings, and completion conditions. Preserve operational detail that changes execution and distinguish user requirements, task parameters, temporary exceptions, and proposed extensions. Use action-led steps for sequences, compact tables for alternatives, or short paragraphs for reasoning; no mandatory step count.
+- **Example:** Use a descriptive heading and enough context to explain recorded tasks, roles, choices, and results without repeating the full Workflow. Keep multiple applications separately attributed. Retain discovery history when it clarifies the application. Preserve attribution and outcome status; simplifying the setting must not invent actions or success, or turn proposed Workflow steps into historical claims. Partial and failed applications can qualify; scenarios that did not occur cannot.
 - **Evidence:** List final summary content-line IDs supporting the recorded application and origin of the method. Use individual comma-separated IDs without ranges. Generalized Workflow recommendations remain inferences and do not require proof of every future application.
 
 Use paragraphs, subheadings, lists, tables, blockquotes, emphasis, inline code, and fenced code where helpful, without a length or formatting quota. Use Markdown subheadings or bold text for internal labels. Unindented single-word labels such as `Title:` or `Context:` outside code are reserved for card fields, and `# Ixxx` lines outside code begin cards. Close every code fence; apparent fields or card headings inside it are literal content.
+
+Define unfamiliar terms and mathematical symbols near their use, including the order of transformations and aggregation. Use selective bold emphasis, keep qualifications beside their claims, and retain useful explanation rather than optimizing for brevity. Category classifications do not add fields to this format.
 
 ## Origin types
 
