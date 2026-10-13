@@ -1,0 +1,10 @@
+{
+  "source": "skill-creator/SKILL.md",
+  "sourceKind": "installed Codex system skill",
+  "sourceSha256": "6656e54755638e8efcf275a472b9672eaa8a9a1b9e59dc210e275b03b59e1e66",
+  "excerptSha256": "58e8c5c0e6e72d3466de43e3849bde271a7b3f9dfc3cef0ce1e780afedd964b5",
+  "section": "Write the Instructions",
+  "capturedAt": "2026-10-10",
+  "application": "The excerpt is unchanged. The appended local guidance applies Description, Workflow, and Example to skill prototypes, leaving concrete tool selection and implementation for later.",
+  "guidanceSha256": "7cfc60ea501b43fe433ccbba9b8d7ac10deac0d9dffa184bb21a495de8eb6796"
+}

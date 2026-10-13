@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -45,6 +46,11 @@ class TrajectoryAgentsTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        self.categories = self.root / "insight_categories.md"
+        self.categories.write_bytes(RUN.CATEGORY_REFERENCE.read_bytes())
+        category_patch = patch.object(RUN, "CATEGORY_REFERENCE", self.categories)
+        category_patch.start()
+        self.addCleanup(category_patch.stop)
         self.source = self.root / "input.jsonl"
         self.original = b'{"type":"session_meta","payload":{"id":"synthetic"}}\n'
         self.source.write_bytes(self.original)
@@ -136,6 +142,56 @@ class TrajectoryAgentsTests(unittest.TestCase):
             self.assertIn((RUN.KIT / "prompts" / name).read_bytes(), RUN.fixed_template(stage))
             if stage in {"insight", "redaction"}:
                 self.assertIn(RUN.CARD_FORMAT.read_bytes(), RUN.fixed_template(stage))
+
+    def test_categories_are_embedded_only_in_insight_for_both_hosts(self):
+        reference = self.categories.read_bytes()
+        for host in RUN.HOSTS:
+            for stage in RUN.STAGES:
+                with self.subTest(host=host, stage=stage):
+                    count = RUN.fixed_template(stage, host=host).count(reference)
+                    self.assertEqual(count, 1 if stage == "insight" else 0)
+
+    def test_category_changes_do_not_change_prepared_dispatch(self):
+        self.finish_summary()
+        frozen = (self.run / "protocol/insight-template.md").read_bytes()
+        self.assertIn(self.categories.read_bytes(), frozen)
+        self.categories.unlink()
+        call = RUN.issue_call(self.source, "insight")
+        self.assertTrue(call["message"].startswith(frozen.decode()))
+        RUN.verify_resume(self.source)
+
+    def test_modified_frozen_category_guidance_is_rejected(self):
+        RUN.prepare(self.source)
+        template = self.run / "protocol/insight-template.md"
+        original = self.categories.read_bytes()
+        saved = template.read_bytes()
+        self.assertEqual(saved.count(original), 1)
+        template.write_bytes(saved.replace(original, b"Changed category criteria\n"))
+        with self.assertRaisesRegex(RUN.RunError, "saved_protocol_changed"):
+            RUN.verify_resume(self.source)
+
+    def test_missing_or_invalid_category_reference_prevents_preparation(self):
+        for data in (None, b"", b"\xff"):
+            with self.subTest(data=data):
+                if data is None:
+                    self.categories.unlink(missing_ok=True)
+                else:
+                    self.categories.write_bytes(data)
+                with self.assertRaisesRegex(RUN.RunError, "category_reference_unavailable"):
+                    RUN.prepare(self.source)
+                self.assertFalse(self.run.exists())
+
+    def test_category_demonstrations_parse_against_their_own_sources(self):
+        examples = re.findall(
+            r"Source:\n\n```text\n(.*?)\n```\n\nExpected card:\n\n```markdown\n(.*?)\n```",
+            self.categories.read_text(), re.S,
+        )
+        self.assertEqual(len(examples), 6)
+        for source, card in examples:
+            labels = re.findall(r"^(L\d{3}) ", source, re.M)
+            parsed = RUN.CARDS.parse_cards(card.encode(), labels)
+            self.assertEqual(len(parsed), 1)
+            self.assertEqual(parsed[0]["id"], "I001")
 
     def test_paragraph_cards_complete_both_stages_without_companion_files(self):
         self.assertEqual(self.finish_insight(PARAGRAPH_INSIGHTS)["insights"], 1)
