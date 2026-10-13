@@ -5,7 +5,12 @@ import { isReviewCreatePayload } from '@/lib/review-import';
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) return unauthorizedResponse();
   try {
-    return Response.json({ reviews: await listReviews() });
+    return Response.json(
+      { reviews: await listReviews() },
+      {
+        headers: { 'Cache-Control': 'no-store' },
+      },
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Unable to load reviews.';

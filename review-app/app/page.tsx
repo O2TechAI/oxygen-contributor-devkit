@@ -51,6 +51,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { RichSummary } from '@/components/rich-summary';
 import { ReviewGuide } from '@/components/review-guide';
 import { ReviewInfo } from '@/components/review-info';
+import { ReviewChanges } from '@/components/review-changes';
 import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
 import { ImportReview } from '@/components/import-review';
 import { TrajectoryPanel } from '@/components/trajectory-panel';
@@ -80,7 +81,11 @@ import {
   type SummaryLine,
 } from '@/lib/review-types';
 import { cn } from '@/lib/utils';
-import { Autosave } from '@/lib/autosave';
+import { Autosave, SaveConflictError } from '@/lib/autosave';
+import {
+  ReviewRevisionClient,
+  type PendingReviewSave,
+} from '@/lib/review-save';
 import {
   classifySummaryLines,
   detectedInsightKeys,
@@ -140,6 +145,7 @@ export default function Home() {
   const [loginPending, setLoginPending] = useState(false);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoaded, setReviewsLoaded] = useState(false);
+  const [requestedReviewMissing, setRequestedReviewMissing] = useState(false);
   const [activeId, setActiveId] = useState('');
   const [selectedInsight, setSelectedInsight] = useState('');
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
@@ -162,6 +168,8 @@ export default function Home() {
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
   const [saveError, setSaveError] = useState('');
+  const [saveConflict, setSaveConflict] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [promptFeedback, setPromptFeedback] = useState('');
   const [batchExportOpen, setBatchExportOpen] = useState(false);
@@ -170,35 +178,20 @@ export default function Home() {
 
   const active = reviews.find((review) => review.id === activeId) ?? reviews[0];
   const activeRef = useRef(active);
+  const editorRef = useRef(editorTarget);
+  const [revisionClient] = useState(() => new ReviewRevisionClient());
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+  useEffect(() => {
+    editorRef.current = editorTarget;
+  }, [editorTarget]);
   const [autosave] = useState(
     () =>
-      new Autosave<{ review: Review; note: string; status: Review['status'] }>(
-        async ({ review: snapshot, note, status }) => {
-          const response = await fetch(
-            `/api/reviews/${snapshot.id}/revisions`,
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                trajectorySummary: snapshot.trajectorySummary,
-                summaryGroups: snapshot.summaryGroups,
-                summaryLines: snapshot.summaryLines,
-                insights: snapshot.insights,
-                note,
-                status,
-              }),
-            },
-          );
-          if (!response.ok) {
-            const result = (await response.json().catch(() => null)) as {
-              error?: string;
-            } | null;
-            throw new Error(result?.error || 'Autosave failed. Please retry.');
-          }
-          const { review } = (await response.json()) as { review: Review };
+      new Autosave<PendingReviewSave>(
+        async (pending) => {
+          const snapshot = pending.review;
+          const { review, savedVersion } = await revisionClient.save(pending);
           // A response from an earlier edit must never overwrite newer local edits.
           setReviews((current) =>
             current.map((item) =>
@@ -209,12 +202,17 @@ export default function Home() {
                     item.summaryGroups === snapshot.summaryGroups &&
                     item.trajectorySummary === snapshot.trajectorySummary
                   ? review
-                  : { ...item, revisionCount: review.revisionCount },
+                  : {
+                      ...item,
+                      revisionCount: review.revisionCount,
+                      version: savedVersion,
+                    },
             ),
           );
         },
         (state, error) => {
           setDirty(state !== 'saved');
+          setSaveConflict(error instanceof SaveConflictError);
           setSaveState(state === 'pending' ? 'idle' : state);
           setSaveError(
             error instanceof Error
@@ -229,7 +227,7 @@ export default function Home() {
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!autosave.hasPending) return;
+      if (!autosave.hasPending && !editorRef.current) return;
       event.preventDefault();
     };
     const flushOnHide = () => {
@@ -316,6 +314,20 @@ export default function Home() {
       })
       .then(({ reviews: loaded }) => {
         if (cancelled) return;
+        const requestedId = new URLSearchParams(window.location.search).get(
+          'review',
+        );
+        if (
+          requestedId &&
+          !loaded.some((review) => review.id === requestedId)
+        ) {
+          setRequestedReviewMissing(true);
+          setReviews([]);
+          setReviewsLoaded(true);
+          return;
+        }
+        setRequestedReviewMissing(false);
+        loaded.forEach((review) => revisionClient.loaded(review));
         setReviews(loaded);
         setReviewsLoaded(true);
         if (loaded.length) {
@@ -334,15 +346,18 @@ export default function Home() {
             parameters.get('run') ??
             trajectoryIdentity(fallback.sourcePath, fallback.id).run;
           setExportIds(defaultReviewSelection(loaded, run));
-          if (parameters.get('trajectories') === '1') {
+          if (
+            parameters.get('trajectories') === '1' &&
+            !parameters.has('changes')
+          ) {
             setBatchExportOpen(true);
           }
-          setSelectedInsight((current) =>
-            loaded.some((review) =>
-              review.insights.some((insight) => insight.id === current),
-            )
-              ? current
-              : (fallback.insights[0]?.id ?? ''),
+          const requestedInsight = parameters.get('insight');
+          setSelectedInsight(
+            fallback.insights.find((insight) => insight.id === requestedInsight)
+              ?.id ??
+              fallback.insights[0]?.id ??
+              '',
           );
         }
       })
@@ -358,7 +373,16 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [authState]);
+  }, [authState, revisionClient]);
+
+  useEffect(() => {
+    if (!reviewsLoaded || !active) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('review', active.id);
+    if (selected?.id) url.searchParams.set('insight', selected.id);
+    else url.searchParams.delete('insight');
+    window.history.replaceState(null, '', url);
+  }, [reviewsLoaded, active, selected?.id]);
 
   async function handleLogin(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -407,6 +431,7 @@ export default function Home() {
   }
 
   function openImportedReview(review: Review) {
+    revisionClient.loaded(review);
     setReviews((current) => [review, ...current]);
     activateReview(review);
   }
@@ -415,6 +440,7 @@ export default function Home() {
     setActiveId(review.id);
     const url = new URL(window.location.href);
     url.searchParams.set('review', review.id);
+    url.searchParams.delete('changes');
     window.history.replaceState(null, '', url);
     setSelectedInsight(review.insights[0]?.id ?? '');
     setDirty(false);
@@ -430,7 +456,66 @@ export default function Home() {
     setReviews((items) =>
       items.map((item) => (item.id === next.id ? next : item)),
     );
-    autosave.enqueue({ review: next, note, status: 'in_review' });
+    autosave.enqueue({
+      review: next,
+      note,
+      status: 'in_review',
+      requestId: crypto.randomUUID(),
+    });
+  }
+
+  function downloadUnsavedDraft() {
+    const draft = activeRef.current;
+    if (!draft) return;
+    const contents = JSON.stringify(
+      {
+        reviewId: draft.id,
+        expectedVersion: revisionClient.versionFor(draft),
+        trajectorySummary: draft.trajectorySummary,
+        summaryGroups: draft.summaryGroups,
+        summaryLines: draft.summaryLines,
+        insights: draft.insights,
+        status: draft.status,
+      },
+      (key, value: unknown) => (key === 'originalText' ? undefined : value),
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([contents], { type: 'application/json' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${draft.id}-unsaved-draft.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function loadSavedForReconciliation() {
+    if (!activeRef.current) return;
+    try {
+      const response = await fetch(
+        `/api/reviews/${activeRef.current.id}/revisions`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok)
+        throw new Error(
+          'Unable to load the saved review. Your draft is retained.',
+        );
+      const { review } = (await response.json()) as { review: Review };
+      autosave.discardAfterReconciliation();
+      revisionClient.loaded(review);
+      activeRef.current = review;
+      setReviews((current) =>
+        current.map((item) => (item.id === review.id ? review : item)),
+      );
+      setSaveError('');
+      setSaveConflict(false);
+      setReconcileOpen(false);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Unable to load saved review.',
+      );
+    }
   }
 
   function resetDraft() {
@@ -465,6 +550,7 @@ export default function Home() {
       if (!line) return;
       setDraftText(line.text);
     } else {
+      setSelectedInsight(id);
       const insight = active.insights.find((item) => item.id === id);
       if (!insight) return;
       setDraftText(
@@ -824,6 +910,7 @@ export default function Home() {
   }
 
   function setInsightStatus(id: string, status: InsightStatus) {
+    setSelectedInsight(id);
     updateActive(
       (review) => ({
         ...review,
@@ -873,12 +960,19 @@ export default function Home() {
           ? 'Human review completed.'
           : 'Review autosaved.',
       status,
+      requestId: crypto.randomUUID(),
     });
     await autosave.flush();
   }
 
   if (authState === 'checking') {
     return <CenteredMessage label="Checking access…" />;
+  }
+
+  if (authState === 'signed_in' && requestedReviewMissing) {
+    return (
+      <CenteredMessage label="This review is no longer available. Open the current review link." />
+    );
   }
 
   if (authState === 'signed_out') {
@@ -986,7 +1080,10 @@ export default function Home() {
           <span className="grid size-5 shrink-0 place-items-center rounded-[4px] bg-foreground text-background">
             <Sparkles className="size-3" />
           </span>
-          <p className="px-1 text-sm font-medium" title="Human approval workspace">
+          <p
+            className="px-1 text-sm font-medium"
+            title="Human approval workspace"
+          >
             Oxygen Review
           </p>
           <span className="text-sm text-muted-foreground/60">/</span>
@@ -1008,13 +1105,17 @@ export default function Home() {
           {active.format === 'v5' && (
             <Badge
               variant="secondary"
-              className={active.privacyStatus === 'redacted'
-                ? 'bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]'
-                : 'bg-[#ffe2dd] text-[#5d1715]'}
+              className={
+                active.privacyStatus === 'redacted'
+                  ? 'bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]'
+                  : 'bg-[#ffe2dd] text-[#5d1715]'
+              }
             >
-              {active.privacyStatus === 'redacted'
-                ? <ShieldCheck className="size-3" />
-                : <AlertTriangle className="size-3" />}
+              {active.privacyStatus === 'redacted' ? (
+                <ShieldCheck className="size-3" />
+              ) : (
+                <AlertTriangle className="size-3" />
+              )}
               {active.privacyStatus === 'redacted' ? 'Redacted' : 'Unredacted'}
             </Badge>
           )}
@@ -1023,6 +1124,11 @@ export default function Home() {
         <div className="flex max-w-full flex-wrap items-center gap-2">
           <ReviewGuide review={active} />
           <ReviewInfo review={active} />
+          <ReviewChanges
+            key={active.id}
+            reviewId={active.id}
+            version={active.version ?? active.revisionCount}
+          />
           <ImportReview
             disabled={dirty || saveState === 'saving' || editorTarget !== null}
             onImported={openImportedReview}
@@ -1069,17 +1175,23 @@ export default function Home() {
             <List data-icon="inline-start" />
             Trajectories ({groupTrajectories(reviews).length})
           </Button>
-          {saveState === 'error' && dirty && (
+          {saveState === 'error' && dirty && !saveConflict && (
             <Button variant="outline" onClick={() => void autosave.flush()}>
               Retry autosave
             </Button>
           )}
           <div className="flex items-center gap-2">
-            <span role="status" aria-label="Review progress" className="text-xs text-muted-foreground">
-              {active.insights.length - unresolved}/{active.insights.length} reviewed
-            </span>
+            <output
+              aria-label="Review progress"
+              className="text-xs text-muted-foreground"
+            >
+              {active.insights.length - unresolved}/{active.insights.length}{' '}
+              reviewed
+            </output>
             <Button
-              disabled={saveState === 'saving' || editorTarget !== null || !completable}
+              disabled={
+                saveState === 'saving' || editorTarget !== null || !completable
+              }
               title={
                 editorTarget !== null
                   ? 'Apply or cancel your edit before completing'
@@ -1104,6 +1216,50 @@ export default function Home() {
         </div>
       </header>
 
+      {saveConflict && (
+        <div
+          role="alert"
+          className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"
+        >
+          <p className="min-w-48 flex-1">
+            The saved review changed in another session. Your unsaved draft is
+            still here. Download it before loading the latest saved version to
+            reconcile your changes.
+          </p>
+          <Button variant="outline" onClick={downloadUnsavedDraft}>
+            Download unsaved draft
+          </Button>
+          <Button
+            variant="outline"
+            disabled={editorTarget !== null}
+            onClick={() => setReconcileOpen(true)}
+          >
+            Load saved version
+          </Button>
+        </div>
+      )}
+
+      <AlertDialog open={reconcileOpen} onOpenChange={setReconcileOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Load the latest saved review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This replaces the unsaved draft shown here. Download the draft
+              first if you want to reconcile any of its changes with the saved
+              review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep draft</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void loadSavedForReconciliation()}
+            >
+              Load saved version
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
         <section
           className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
@@ -1115,7 +1271,9 @@ export default function Home() {
               <h1 id="summary-heading" className="text-sm font-medium">
                 Summary
               </h1>
-              <span className="text-sm text-muted-foreground">{active.summaryLines.length}</span>
+              <span className="text-sm text-muted-foreground">
+                {active.summaryLines.length}
+              </span>
             </div>
             <Button
               size="sm"
@@ -1168,7 +1326,9 @@ export default function Home() {
               <h2 id="insights-heading" className="text-sm font-medium">
                 Insight cards
               </h2>
-              <span className="text-sm text-muted-foreground">{active.insights.length}</span>
+              <span className="text-sm text-muted-foreground">
+                {active.insights.length}
+              </span>
             </div>
             <Button
               size="sm"
@@ -1196,9 +1356,10 @@ export default function Home() {
                     onSelect={() => setSelectedInsight(insight.id)}
                     onEvidence={(lineId) => jumpToEvidence(insight.id, lineId)}
                     onEdit={() => openEditor('insight', insight.id)}
-                    onDelete={() =>
-                      setDeleteTarget({ kind: 'insight', id: insight.id })
-                    }
+                    onDelete={() => {
+                      setSelectedInsight(insight.id);
+                      setDeleteTarget({ kind: 'insight', id: insight.id });
+                    }}
                     onStatus={(status) => setInsightStatus(insight.id, status)}
                   />
                 ))}
@@ -1232,7 +1393,8 @@ export default function Home() {
                     : `Insight ${editorTarget?.id ?? ''}`}
             </SheetTitle>
             <SheetDescription>
-              Changes are stored as an append-only review revision.
+              Changes are saved in review history. Explicit privacy cleanup can
+              sanitize earlier versions.
             </SheetDescription>
           </SheetHeader>
           <ScrollArea className="min-h-0 flex-1 overscroll-contain">
@@ -1744,7 +1906,10 @@ function InsightCard({
               insightStatusClasses(insight.status),
             )}
           >
-            <span aria-hidden className="size-1.5 rounded-full bg-current opacity-70" />
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full bg-current opacity-70"
+            />
             {insightStatusLabel(insight.status)}
           </span>
         </div>
@@ -1998,9 +2163,7 @@ function Field({
 }) {
   return (
     <label htmlFor={htmlFor} className="block space-y-2">
-      <span className="text-xs font-medium text-muted-foreground">
-        {label}
-      </span>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
   );

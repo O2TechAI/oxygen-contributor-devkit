@@ -1,6 +1,38 @@
-import { listReviews, saveRevision } from '@/db/reviews';
+import {
+  getReviewHistory,
+  ReviewWriteError,
+  saveReviewRevision,
+  validWriteIdentity,
+} from '@/db/reviews';
 import { isAuthenticated, unauthorizedResponse } from '@/lib/auth';
-import { isValidPayload, isValidV5Review } from '@/lib/review-validation';
+import { isValidPayload } from '@/lib/review-validation';
+
+const headers = { 'Cache-Control': 'no-store' };
+
+function failure(error: unknown) {
+  return Response.json(
+    {
+      error:
+        error instanceof ReviewWriteError
+          ? error.message
+          : 'Unable to access the review revision.',
+    },
+    { status: error instanceof ReviewWriteError ? error.status : 500, headers },
+  );
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ reviewId: string }> },
+) {
+  if (!(await isAuthenticated(request))) return unauthorizedResponse();
+  try {
+    const { reviewId } = await context.params;
+    return Response.json(await getReviewHistory(reviewId), { headers });
+  } catch (error) {
+    return failure(error);
+  }
+}
 
 export async function POST(
   request: Request,
@@ -9,33 +41,20 @@ export async function POST(
   if (!(await isAuthenticated(request))) return unauthorizedResponse();
   try {
     const payload: unknown = await request.json();
-    if (!isValidPayload(payload)) {
-      return Response.json(
-        { error: 'Invalid review revision.' },
-        { status: 400 },
-      );
-    }
-    const { reviewId } = await context.params;
-    const review = (await listReviews()).find((item) => item.id === reviewId);
-    if (!review) {
-      return Response.json({ error: 'Review not found.' }, { status: 404 });
-    }
-    if (!isValidV5Review(review, payload)) {
+    if (!isValidPayload(payload) || !validWriteIdentity(payload)) {
       return Response.json(
         {
           error:
-            'The v5 revision has invalid fields, evidence, line IDs, or completion state.',
+            'Invalid review revision: a saved version and unique request ID are required.',
         },
-        { status: 400 },
+        { status: 400, headers },
       );
     }
-    return Response.json({ review: await saveRevision(reviewId, payload) });
+    const { reviewId } = await context.params;
+    return Response.json(await saveReviewRevision(reviewId, payload), {
+      headers,
+    });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Unable to save review.';
-    return Response.json(
-      { error: message },
-      { status: message === 'Review not found.' ? 404 : 500 },
-    );
+    return failure(error);
   }
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oxygen Assisted Review"
+  short_description: "Edit review insights and retain request snapshots"
+  default_prompt: "Use $oxygen-assisted-review to edit the current Oxygen review, save the request and snapshot, and show the changes in the review page."

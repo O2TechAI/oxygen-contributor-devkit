@@ -118,6 +118,27 @@ decisions, and deletions from the database. Unsaved edits and checkbox selection
 are browser-session state. Export bundles are outputs, not database backups or
 editable-session import files.
 
+## Conversational review
+
+Use the [assisted-review skill](../skills/oxygen-assisted-review/SKILL.md) when
+asking an agent to edit the open review. The URL identifies the review and
+selected insight. The helper retains each request and its resulting snapshot;
+after saving, the agent automatically refreshes or opens the returned link to
+show **Changes** inside the app.
+Workspace browser tools such as Codex use the helper's `openUrl`; `url` is the
+client-facing link. Reopening a client's temporary forwarded port from the
+workspace can fail, so check the server address and host before opening it.
+Changes show saved versions with line-by-line additions and removals, including
+decisions. Comment-only requests keep an unchanged snapshot.
+
+Browser and agent saves check the version they started from. A conflict keeps
+the browser draft available for reconciliation instead of overwriting newer
+work. Explicit privacy requests replace the review with a new opaque identity
+and a single initial baseline. Earlier originals, revisions, requests, diffs,
+and source-linked receipts are discarded; the agent opens the new initial state.
+Ordinary edits and deletions preserve history. See the skill for archive and
+backup scope.
+
 ## Publish a completed run
 
 You can also choose **Import review** in the app and select a prepared run JSON
@@ -171,7 +192,7 @@ Scope/Takeaway cards. The database stores these formats in its existing JSON col
   deterministically renumbers surviving lines, remaps citations, and reopens
   cards that lost evidence.
 - Generated artifacts remain immutable in the original database columns. Every
-  save creates an append-only revision snapshot.
+  save creates a revision snapshot. Explicit privacy cleanup replaces stored history with a new initial baseline.
 - The cross **declines** an Insight (`rejected` in the saved data), retaining
   the card and its edits. Trash **deletes** the card from the current review
   after confirmation. Deleted cards are excluded from exports, including their
