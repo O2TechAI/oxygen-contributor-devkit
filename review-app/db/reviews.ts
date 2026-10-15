@@ -6,9 +6,16 @@ import type {
   Review,
   ReviewCreatePayload,
   ReviewHierarchy,
+  ReviewState,
+  ReviewHistory,
+  ReviewHistorySnapshot,
+  ReviewPrivacyPayload,
+  ReviewPrivacyResult,
+  ReviewWriteResult,
   ReviewSavePayload,
   SummaryLine,
 } from '@/lib/review-types';
+import { isValidPayload, isValidV5Review } from '@/lib/review-validation';
 import { insightKeys, normalizeInsightType } from '@/lib/review-types';
 import { parseSummary, validateSummaryGroups } from '@/lib/summary-format';
 import { parseV5Review } from '@/lib/review-import';
@@ -33,6 +40,10 @@ type ReviewRow = {
   current_hierarchy_json: string;
   updated_at: string;
   revision_count: number;
+  version: number;
+  privacy_epoch: number;
+  initial_status: Review['status'];
+  created_at: string;
 };
 
 let initialized = false;
@@ -85,7 +96,10 @@ function mapReview(row: ReviewRow): Review {
     originalSummary.map((line) => [line.id, line.text]),
   );
   const originalInsightsById = new Map(
-    originalInsights.map((insight) => [insight.id, insight.originalText]),
+    originalInsights.map((insight) => [
+      insight.id,
+      insight.originalText ?? insight.text,
+    ]),
   );
 
   return {
@@ -96,6 +110,8 @@ function mapReview(row: ReviewRow): Review {
     generatedAt: row.generated_at,
     updatedAt: row.updated_at,
     revisionCount: Number(row.revision_count || 0),
+    version: row.version,
+    privacyEpoch: row.privacy_epoch,
     format: currentHierarchy.format ?? originalHierarchy.format ?? 'legacy',
     protocolVersion:
       currentHierarchy.protocolVersion ??
@@ -115,7 +131,7 @@ function mapReview(row: ReviewRow): Review {
       ...currentHierarchy.trajectorySummary,
       originalText:
         originalHierarchy.trajectorySummary.text ||
-        currentHierarchy.trajectorySummary.originalText,
+        (currentHierarchy.trajectorySummary.originalText ?? ''),
     },
     summaryGroups: currentHierarchy.summaryGroups.map((group) => ({
       ...group,
@@ -165,6 +181,11 @@ function hierarchyFor(review: Review): ReviewHierarchy {
 async function ensureDatabase() {
   if (initialized) return;
   const db = database();
+  // Seed a new database only; a removed sample must not reappear after reset.
+  if (await db.prepare('SELECT id FROM reviews LIMIT 1').first()) {
+    initialized = true;
+    return;
+  }
   const inserts = sampleReviews.map((review) =>
     db
       .prepare(`INSERT OR IGNORE INTO reviews (
@@ -314,67 +335,613 @@ export async function createReview(
   return reviews.find((review) => review.id === reviewId)!;
 }
 
+export class ReviewWriteError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = 'ReviewWriteError';
+  }
+}
+
+type RevisionRow = {
+  revision_number: number;
+  request_id: string | null;
+  request_hash: string | null;
+  kind: 'edit' | 'privacy';
+  created_at: string;
+  note: string;
+  status: Review['status'];
+  summary_json: string;
+  insights_json: string;
+  hierarchy_json: string;
+};
+
+/** Strip recursively: archived snapshots must never hide old originals. */
+function cleanStateValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(cleanStateValue) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== 'originalText')
+        .map(([key, child]) => [key, cleanStateValue(child)]),
+    ) as T;
+  }
+  return value;
+}
+
+function stateFor(value: Review | ReviewSavePayload): ReviewState {
+  return cleanStateValue({
+    trajectorySummary: value.trajectorySummary,
+    summaryGroups: value.summaryGroups,
+    summaryLines: value.summaryLines,
+    insights: value.insights,
+    status: value.status,
+  });
+}
+
+function stateFromColumns(
+  summary: string,
+  insights: string,
+  hierarchy: string,
+  status: Review['status'],
+): ReviewState {
+  const parsed = normalizeHierarchy(hierarchy);
+  return cleanStateValue({
+    trajectorySummary: parsed.trajectorySummary,
+    summaryGroups: parsed.summaryGroups,
+    summaryLines: parseJson<SummaryLine[]>(summary),
+    insights: parseJson<Insight[]>(insights),
+    status,
+  });
+}
+
+async function rowFor(reviewId: string): Promise<ReviewRow> {
+  await ensureDatabase();
+  const row = await database()
+    .prepare(`SELECT reviews.*,
+    (SELECT COUNT(*) FROM review_revisions WHERE review_id = reviews.id) AS revision_count
+    FROM reviews WHERE id = ?`)
+    .bind(reviewId)
+    .first<ReviewRow>();
+  if (!row) throw new ReviewWriteError('Review not found.', 404);
+  return row;
+}
+
+async function rowWithHistory(reviewId: string) {
+  await ensureDatabase();
+  // A single SELECT provides a consistent snapshot even during privacy cleanup.
+  const row = await database()
+    .prepare(`SELECT reviews.*,
+    (SELECT COUNT(*) FROM review_revisions WHERE review_id = reviews.id) AS revision_count,
+    (SELECT json_group_array(json_object(
+      'revision_number', revision_number, 'request_id', request_id, 'request_hash', request_hash,
+      'kind', kind, 'created_at', created_at, 'note', note, 'status', status,
+      'summary_json', summary_json, 'insights_json', insights_json, 'hierarchy_json', hierarchy_json))
+      FROM (SELECT * FROM review_revisions WHERE review_id = reviews.id ORDER BY revision_number)) AS history_json
+    FROM reviews WHERE id = ?`)
+    .bind(reviewId)
+    .first<ReviewRow & { history_json: string }>();
+  if (!row) throw new ReviewWriteError('Review not found.', 404);
+  return { row, revisions: parseJson<RevisionRow[]>(row.history_json) };
+}
+
+export async function getReviewHistory(
+  reviewId: string,
+): Promise<ReviewHistory> {
+  const { row, revisions } = await rowWithHistory(reviewId);
+  return {
+    review: mapReview(row),
+    snapshots: [
+      {
+        version: 0,
+        kind: 'initial',
+        createdAt: row.created_at,
+        note: '',
+        state: stateFromColumns(
+          row.original_summary_json,
+          row.original_insights_json,
+          row.original_hierarchy_json,
+          row.initial_status,
+        ),
+      },
+      ...revisions.map(
+        (revision): ReviewHistorySnapshot => ({
+          version: revision.revision_number,
+          ...(revision.request_id ? { requestId: revision.request_id } : {}),
+          kind: revision.kind,
+          createdAt: revision.created_at,
+          note: revision.note,
+          state: stateFromColumns(
+            revision.summary_json,
+            revision.insights_json,
+            revision.hierarchy_json,
+            revision.status,
+          ),
+        }),
+      ),
+    ],
+  };
+}
+
+export function validWriteIdentity(
+  value: unknown,
+): value is { expectedVersion: number; requestId: string } {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as { expectedVersion?: unknown; requestId?: unknown };
+  return (
+    Number.isSafeInteger(payload.expectedVersion) &&
+    Number(payload.expectedVersion) >= 0 &&
+    typeof payload.requestId === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(payload.requestId)
+  );
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  if (value && typeof value === 'object')
+    return (
+      '{' +
+      Object.entries(value)
+        .filter(([, child]) => child !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, child]) => JSON.stringify(key) + ':' + canonical(child))
+        .join(',') +
+      '}'
+    );
+  return JSON.stringify(value);
+}
+
+async function requestHash(value: unknown) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(canonical(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
+
+async function requestResult(
+  reviewId: string,
+  requestId: string,
+  hash: string,
+  replayed: boolean,
+): Promise<ReviewWriteResult | undefined> {
+  const { row, revisions } = await rowWithHistory(reviewId);
+  const saved = revisions.find((revision) => revision.request_id === requestId);
+  if (!saved) return undefined;
+  if (saved.request_hash !== hash)
+    throw new ReviewWriteError(
+      'This request ID was already used for different changes.',
+      409,
+    );
+  // Idempotent recovery returns the recorded result, not a later edit. Originals
+  // are always fetched fresh so privacy cleanup cannot resurrect hidden text.
+  const review = mapReview({
+    ...row,
+    current_summary_json: saved.summary_json,
+    current_insights_json: saved.insights_json,
+    current_hierarchy_json: saved.hierarchy_json,
+    status: saved.status,
+    updated_at: saved.created_at,
+    version: saved.revision_number,
+    revision_count: revisions.filter(
+      (revision) => revision.revision_number <= saved.revision_number,
+    ).length,
+  });
+  return {
+    review,
+    savedVersion: saved.revision_number,
+    requestId,
+    ...(replayed ? { replayed: true } : {}),
+  };
+}
+
+function validateState(review: Review, state: ReviewState, note: string) {
+  const payload = { ...state, note };
+  if (
+    !isValidPayload(payload) ||
+    !isValidV5Review(review, payload) ||
+    new Set(state.insights.map((insight) => insight.id)).size !==
+      state.insights.length
+  ) {
+    throw new ReviewWriteError(
+      'Invalid review fields, evidence, line IDs, or completion state.',
+      400,
+    );
+  }
+}
+
+function columnsFor(state: ReviewState, hierarchy: ReviewHierarchy) {
+  return [
+    JSON.stringify(cleanStateValue(state.summaryLines)),
+    JSON.stringify(cleanStateValue(state.insights)),
+    JSON.stringify(
+      cleanStateValue({
+        ...hierarchy,
+        trajectorySummary: state.trajectorySummary,
+        summaryGroups: state.summaryGroups,
+      }),
+    ),
+  ];
+}
+
+export async function saveReviewRevision(
+  reviewId: string,
+  payload: ReviewSavePayload,
+): Promise<ReviewWriteResult> {
+  if (!validWriteIdentity(payload))
+    throw new ReviewWriteError(
+      'A saved version and unique request ID are required.',
+      400,
+    );
+  const state = stateFor(payload);
+  const hash = await requestHash({
+    kind: 'edit',
+    expectedVersion: payload.expectedVersion,
+    state,
+    note: payload.note,
+  });
+  await ensureDatabase();
+  const replay = await requestResult(reviewId, payload.requestId, hash, true);
+  if (replay) return replay;
+  const row = await rowFor(reviewId);
+  validateState(mapReview(row), state, payload.note);
+  if (row.version !== payload.expectedVersion)
+    throw new ReviewWriteError(
+      'Review changed. Read the latest state before saving.',
+      409,
+    );
+  const db = database();
+  const version = payload.expectedVersion + 1;
+  const now = new Date().toISOString();
+  const [summary, insights, hierarchy] = columnsFor(
+    state,
+    normalizeHierarchy(row.current_hierarchy_json),
+  );
+  // Both writes are in the same transaction. If another client wins after the
+  // read above, the INSERT selects no rows and the UPDATE is also a no-op.
+  await db.batch([
+    db
+      .prepare(`INSERT INTO review_revisions
+      (review_id, revision_number, summary_json, insights_json, hierarchy_json, note, status, created_at, request_id, request_hash, kind)
+      SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'edit' FROM reviews
+      WHERE id = ? AND version = ?`)
+      .bind(
+        version,
+        summary,
+        insights,
+        hierarchy,
+        payload.note,
+        state.status,
+        now,
+        payload.requestId,
+        hash,
+        reviewId,
+        payload.expectedVersion,
+      ),
+    db
+      .prepare(`UPDATE reviews SET current_summary_json = ?, current_insights_json = ?,
+      current_hierarchy_json = ?, status = ?, updated_at = ?, version = ?
+      WHERE id = ? AND version = ? AND EXISTS
+        (SELECT 1 FROM review_revisions WHERE review_id = ? AND request_id = ? AND request_hash = ?)`)
+      .bind(
+        summary,
+        insights,
+        hierarchy,
+        state.status,
+        now,
+        version,
+        reviewId,
+        payload.expectedVersion,
+        reviewId,
+        payload.requestId,
+        hash,
+      ),
+  ]);
+  const result = await requestResult(reviewId, payload.requestId, hash, false);
+  if (!result)
+    throw new ReviewWriteError(
+      'Review changed. Read the latest state before saving.',
+      409,
+    );
+  return result;
+}
+
+/** Kept for internal callers; HTTP clients must supply their observed version. */
 export async function saveRevision(
   reviewId: string,
   payload: ReviewSavePayload,
 ): Promise<Review> {
-  await ensureDatabase();
-  const db = database();
-  const current = await db
-    .prepare('SELECT current_hierarchy_json FROM reviews WHERE id = ?')
-    .bind(reviewId)
-    .first<{ current_hierarchy_json: string }>();
-  if (!current) throw new Error('Review not found.');
+  const row = await rowFor(reviewId);
+  return (
+    await saveReviewRevision(reviewId, {
+      ...payload,
+      expectedVersion: payload.expectedVersion ?? row.version,
+      requestId: payload.requestId ?? crypto.randomUUID(),
+    })
+  ).review;
+}
 
-  const last = await db
-    .prepare(`SELECT COALESCE(MAX(revision_number), 0) AS revision
-    FROM review_revisions WHERE review_id = ?`)
-    .bind(reviewId)
-    .first<{ revision: number }>();
-  const revision = Number(last?.revision || 0) + 1;
-  const createdAt = new Date().toISOString();
-  const summaryJson = JSON.stringify(payload.summaryLines);
-  const insightsJson = JSON.stringify(payload.insights);
-  const existingHierarchy = normalizeHierarchy(current.current_hierarchy_json);
-  const hierarchyJson = JSON.stringify({
-    ...existingHierarchy,
-    trajectorySummary: payload.trajectorySummary,
-    summaryGroups: payload.summaryGroups,
+/** Changed content and changed supporting context invalidate current approvals. */
+function currentPrivacyState(
+  before: ReviewState,
+  sanitized: ReviewState,
+): ReviewState {
+  const sharedContextChanged =
+    canonical(before.trajectorySummary) !==
+      canonical(sanitized.trajectorySummary) ||
+    canonical(before.summaryGroups) !== canonical(sanitized.summaryGroups);
+  const beforeLines = new Map(
+    before.summaryLines.map((line) => [line.id, line]),
+  );
+  const afterLines = new Map(
+    sanitized.summaryLines.map((line) => [line.id, line]),
+  );
+  const oldCards = new Map(
+    before.insights.map((card) => [card.sourceId ?? card.id, card]),
+  );
+  const content = ({
+    status: _status,
+    id: _id,
+    ...card
+  }: ReviewState['insights'][number]) => card;
+  const insights = sanitized.insights.map((card) => {
+    const previous = oldCards.get(card.sourceId ?? card.id);
+    const affected =
+      !previous ||
+      sharedContextChanged ||
+      canonical(content(previous)) !== canonical(content(card)) ||
+      [...new Set([...previous.evidence, ...card.evidence])].some(
+        (id) =>
+          canonical(beforeLines.get(id)) !== canonical(afterLines.get(id)),
+      );
+    if (!affected) return card;
+    return {
+      ...card,
+      status:
+        card.authorship !== 'reviewer' && !card.evidence.length
+          ? ('needs_review' as const)
+          : ('pending' as const),
+    };
   });
+  return {
+    ...sanitized,
+    insights,
+    status:
+      sanitized.status === 'completed' &&
+      insights.some(
+        (card) => card.status === 'pending' || card.status === 'needs_review',
+      )
+        ? 'in_review'
+        : sanitized.status,
+  };
+}
 
+/** Remove hidden source mappings and unknown metadata, retaining only card content. */
+function privacyBaseline(state: ReviewState): ReviewState {
+  const select = <T extends object>(value: T, keys: string[]) =>
+    Object.fromEntries(
+      Object.entries(value).filter(([key]) => keys.includes(key)),
+    );
+  return {
+    trajectorySummary: { text: state.trajectorySummary.text },
+    summaryGroups: state.summaryGroups.map((group) => ({
+      id: group.id,
+      text: group.text,
+      lineIds: group.lineIds,
+    })),
+    summaryLines: state.summaryLines.map((line) =>
+      select(line, ['id', 'text', 'ending', 'kind']),
+    ) as ReviewState['summaryLines'],
+    insights: state.insights.map((card) =>
+      select(card, [
+        'id',
+        'authorship',
+        'title',
+        'presentKeys',
+        'text',
+        'type',
+        'appliesWhen',
+        'scope',
+        'takeaway',
+        'description',
+        'workflow',
+        'example',
+        'why',
+        'evidence',
+        'status',
+      ]),
+    ) as ReviewState['insights'],
+    status: state.status,
+  };
+}
+
+function validPrivacyOperation(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
+}
+
+export async function getPrivacyResetResult(
+  operationId: string,
+  expectedHash?: string,
+): Promise<ReviewPrivacyResult> {
+  if (!validPrivacyOperation(operationId))
+    throw new ReviewWriteError('An opaque operation UUID is required.', 400);
+  await ensureDatabase();
+  const operation = await database()
+    .prepare(
+      'SELECT review_id, request_hash FROM review_privacy_operations WHERE operation_id = ?',
+    )
+    .bind(operationId)
+    .first<{ review_id: string; request_hash: string }>();
+  if (!operation) throw new ReviewWriteError('Saved baseline not found.', 404);
+  if (expectedHash !== undefined && operation.request_hash !== expectedHash)
+    throw new ReviewWriteError(
+      'Operation ID already belongs to different baseline content.',
+      409,
+    );
+  const row = await rowFor(operation.review_id);
+  // Return the baseline even if ordinary editing has since continued. A later
+  // privacy reset removes this operation, so it cannot revive earlier content.
+  const review = mapReview({
+    ...row,
+    current_summary_json: row.original_summary_json,
+    current_insights_json: row.original_insights_json,
+    current_hierarchy_json: row.original_hierarchy_json,
+    status: row.initial_status,
+    version: 0,
+    revision_count: 0,
+    updated_at: row.created_at,
+  });
+  return {
+    review,
+    requestId: operationId,
+    savedVersion: 0,
+    replayed: true,
+    archiveName: review.id,
+    url: `/?review=${encodeURIComponent(review.id)}&changes=0`,
+  };
+}
+
+export async function sanitizeReviewHistory(
+  reviewId: string,
+  payload: ReviewPrivacyPayload,
+): Promise<ReviewPrivacyResult> {
+  if (
+    !validWriteIdentity(payload) ||
+    !validPrivacyOperation(payload.requestId) ||
+    !payload.state ||
+    typeof payload.projectName !== 'string' ||
+    !payload.projectName.trim() ||
+    'snapshots' in payload
+  ) {
+    throw new ReviewWriteError(
+      'Privacy now requires a sanitized current state, project name, and operation UUID; history rewrites are no longer supported.',
+      400,
+    );
+  }
+  const supplied = cleanStateValue(payload.state);
+  const approved = payload.approvedInsightIds ?? [];
+  if (!Array.isArray(approved) || approved.some((id) => typeof id !== 'string'))
+    throw new ReviewWriteError('Explicit approvals must be insight IDs.', 400);
+  // Hash only the surviving content and explicit choices, never old IDs,
+  // revision counts, request text, source mappings or import receipts.
+  let baseline: ReviewState;
+  try {
+    baseline = privacyBaseline(supplied);
+  } catch {
+    throw new ReviewWriteError('Invalid baseline state.', 400);
+  }
+  const hash = await requestHash({
+    state: baseline,
+    projectName: payload.projectName,
+    approved,
+  });
+  try {
+    return await getPrivacyResetResult(payload.requestId, hash);
+  } catch (error) {
+    if (!(error instanceof ReviewWriteError) || error.status !== 404)
+      throw error;
+  }
+  const row = await rowFor(reviewId);
+  if (row.version !== payload.expectedVersion)
+    throw new ReviewWriteError(
+      'Review changed. Read fresh state before resetting history.',
+      409,
+    );
+  const review = mapReview(row);
+  validateState(review, supplied, '');
+  const current = privacyBaseline(
+    currentPrivacyState(privacyBaseline(stateFor(review)), baseline),
+  );
+  if (approved.some((id) => !current.insights.some((card) => card.id === id)))
+    throw new ReviewWriteError(
+      'Explicit approval references a missing insight.',
+      400,
+    );
+  current.insights = current.insights.map((card) =>
+    approved.includes(card.id) ? { ...card, status: 'accepted' } : card,
+  );
+  validateState(review, current, '');
+  const id = `review-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  const hierarchy: ReviewHierarchy = {
+    trajectorySummary: { ...current.trajectorySummary, originalText: '' },
+    summaryGroups: current.summaryGroups.map((group) => ({
+      ...group,
+      originalText: '',
+    })),
+    format: review.format,
+    protocolVersion: review.protocolVersion,
+    stage: 'historical',
+    privacyStatus: review.privacyStatus,
+    provenance: { hashVerified: false, runComplete: false },
+  };
+  const [summary, insights, content] = columnsFor(current, hierarchy);
+  const db = database();
+  const gate =
+    'EXISTS (SELECT 1 FROM review_privacy_operations WHERE operation_id = ? AND review_id = ?)';
   await db.batch([
     db
-      .prepare(`INSERT INTO review_revisions (
-      review_id, revision_number, summary_json, insights_json, hierarchy_json,
-      note, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO reviews (id, project_name, source_path, status, generated_at,
+      original_summary_json, original_insights_json, original_hierarchy_json,
+      current_summary_json, current_insights_json, current_hierarchy_json,
+      created_at, updated_at, version, privacy_epoch, initial_status)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ? FROM reviews WHERE id = ? AND version = ?`)
       .bind(
+        id,
+        payload.projectName,
+        `review:${id}`,
+        current.status,
+        now,
+        summary,
+        insights,
+        content,
+        summary,
+        insights,
+        content,
+        now,
+        now,
+        current.status,
         reviewId,
-        revision,
-        summaryJson,
-        insightsJson,
-        hierarchyJson,
-        payload.note.trim(),
-        payload.status,
-        createdAt,
+        payload.expectedVersion,
       ),
     db
-      .prepare(`UPDATE reviews SET
-      current_summary_json = ?, current_insights_json = ?,
-      current_hierarchy_json = ?, status = ?, updated_at = ?
-      WHERE id = ?`)
-      .bind(
-        summaryJson,
-        insightsJson,
-        hierarchyJson,
-        payload.status,
-        createdAt,
-        reviewId,
-      ),
+      .prepare(
+        'INSERT INTO review_privacy_operations (operation_id, review_id, request_hash) SELECT ?, id, ? FROM reviews WHERE id = ?',
+      )
+      .bind(payload.requestId, hash, id),
+    db
+      .prepare(`DELETE FROM review_revisions WHERE review_id = ? AND ${gate}`)
+      .bind(reviewId, payload.requestId, id),
+    db
+      .prepare(
+        `DELETE FROM review_privacy_operations WHERE review_id = ? AND ${gate}`,
+      )
+      .bind(reviewId, payload.requestId, id),
+    db
+      .prepare(`DELETE FROM reviews WHERE id = ? AND version = ? AND ${gate}`)
+      .bind(reviewId, payload.expectedVersion, payload.requestId, id),
   ]);
-
-  const reviews = await listReviews();
-  return reviews.find((review) => review.id === reviewId)!;
+  try {
+    return {
+      ...(await getPrivacyResetResult(payload.requestId, hash)),
+      replayed: false,
+    };
+  } catch (error) {
+    if (error instanceof ReviewWriteError && error.status === 404)
+      throw new ReviewWriteError(
+        'Review changed. Read fresh state before resetting history.',
+        409,
+      );
+    throw error;
+  }
 }
 
 export async function exportReview(reviewId: string) {

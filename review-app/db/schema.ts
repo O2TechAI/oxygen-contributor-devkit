@@ -17,6 +17,9 @@ export const reviews = sqliteTable(
     sourcePath: text('source_path').notNull(),
     status: text('status').notNull(),
     generatedAt: text('generated_at').notNull(),
+    version: integer('version').notNull().default(0),
+    privacyEpoch: integer('privacy_epoch').notNull().default(0),
+    initialStatus: text('initial_status').notNull().default('ready'),
     originalSummaryJson: text('original_summary_json').notNull(),
     originalInsightsJson: text('original_insights_json').notNull(),
     originalHierarchyJson: text('original_hierarchy_json')
@@ -41,6 +44,9 @@ export const reviewRevisions = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     reviewId: text('review_id').notNull(),
     revisionNumber: integer('revision_number').notNull(),
+    requestId: text('request_id'),
+    requestHash: text('request_hash'),
+    kind: text('kind').notNull().default('edit'),
     summaryJson: text('summary_json').notNull(),
     insightsJson: text('insights_json').notNull(),
     hierarchyJson: text('hierarchy_json').notNull().default(emptyHierarchyJson),
@@ -49,9 +55,26 @@ export const reviewRevisions = sqliteTable(
     createdAt: text('created_at').notNull(),
   },
   (table) => [
+    uniqueIndex('idx_review_revisions_request').on(
+      table.reviewId,
+      table.requestId,
+    ),
     uniqueIndex('idx_review_revisions_review_number').on(
       table.reviewId,
       table.revisionNumber,
     ),
+  ],
+);
+
+// Retry recovery records identify only the surviving baseline, never its source.
+export const reviewPrivacyOperations = sqliteTable(
+  'review_privacy_operations',
+  {
+    operationId: text('operation_id').primaryKey(),
+    reviewId: text('review_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_review_privacy_operations_review').on(table.reviewId),
   ],
 );

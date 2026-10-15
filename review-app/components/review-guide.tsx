@@ -17,6 +17,11 @@ export function ReviewGuide({ review }: { review: Review }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const parameters = new URLSearchParams(window.location.search);
+      // A requested panel takes priority; Help stays available from its button.
+      if (parameters.has('changes') || parameters.get('trajectories') === '1') {
+        return;
+      }
       try {
         setOpen(localStorage.getItem(GUIDE_SEEN) !== '1');
       } catch {

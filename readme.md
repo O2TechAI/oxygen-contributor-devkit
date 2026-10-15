@@ -81,6 +81,8 @@ The collection and stripping steps are standalone Python tools; skills handle th
 - `prompts/summary.md` — readable thematic summaries grounded in the source.
 - `prompts/insight.md` and `prompts/insight-card-format.md` — summary corrections,
   reusable skill-candidate extraction, and the shared six-field card schema.
+- `prompts/insight_categories.md` — shared selection criteria and readable synthetic
+  examples, frozen into single-session insight and cross-session instructions.
 - `prompts/sensitive-redaction.md` — minimal privacy edits that preserve
   nonsensitive content and formatting.
 - `tools/` — utilities and supporting tools, including the Codex collector/stripper
@@ -88,7 +90,27 @@ The collection and stripping steps are standalone Python tools; skills handle th
   `strip_claude_tool_outputs.py`, `claude_trajectory_markdown.py`).
 - `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, and privacy-redaction workers.
 - `skills/oxygen-cross-session-generation/` — infer shared reusable skill candidates from completed review exports.
+- `skills/oxygen-assisted-review/` — conversational review edits, request snapshots, and explicit privacy cleanup.
 - `review-app/` — the Oxygen human-review service and evidence-linked review UI.
+
+### Edit insights with an agent
+
+When a contributor asks an agent to rewrite, add, remove, comment on, or label
+insights in the open review, use the
+[assisted-review skill](skills/oxygen-assisted-review/SKILL.md). It saves each
+request and resulting snapshot, then reloads the review with an in-page diff.
+Explicit privacy requests discard earlier managed history and source-linked
+receipts, saving the sanitized result as a new `0000` baseline. The agent
+automatically refreshes or opens the saved review; ordinary deletions remain
+recorded edits.
+
+```text
+Use ./skills/oxygen-assisted-review/SKILL.md to edit the current review. Make the selected insight easier to read, save my request and the resulting snapshot, and show the changes in the review page.
+```
+
+The example starts from the toolkit root. Keep review archives outside Git in
+your configured run storage. Helper file arguments accept relative paths;
+temporary storage follows the system default or `TMPDIR`.
 
 ### Generate cross-session candidates after review
 
@@ -584,11 +606,13 @@ actual protocol version, including v9; the review format's internal name `v5`
 does not restrict imports to protocol 5. These checks do not establish semantic
 support or complete privacy protection.
 
-The review UI preserves generated originals and append-only human revisions.
+The review UI preserves generated originals and human revisions. Explicit privacy
+cleanup can sanitize those saved copies through the assisted-review skill.
 Selecting evidence opens and highlights its Summary line. Summary edits invalidate
 affected approvals, and only a redacted review with every Insight accepted or
 rejected can be completed. Export produces a bundle containing reviewed Summary,
-labeled Summary, Insights, provenance, decisions, and the revision log. The launch
+labeled Summary, Insights, provenance, and decisions. Request history stays in
+the private assisted-review archive rather than contribution exports. The launch
 instruction completes at verified local imports; approval and export require
 the contributor's review.
 
@@ -625,9 +649,11 @@ The review app's tests run with `npm test` from `review-app/`.
 
 ### Skill candidates with workflows (protocol v9)
 
-Select useful methods from an “aha” moment. Description briefly states what the
-skill does and when it applies; Workflow proposes the abstract approach; Example
-shows an actual recorded application in an abstracted, understandable setting.
+Select useful procedures, decision rules, and contextual user requirements using
+the category criteria and recorded evidence. Description states the task, context,
+and reason to use the method; Workflow connects actions, settings, decisions, and
+completion conditions; Example shows an actual application under a descriptive
+heading. Preserve operational details, defaults, and exceptions needed for use.
 Simplification must not add actions, retrofit proposed steps into history, or
 invent success. Prefer successful applications, while allowing partial or failed
 applications that reveal a useful method. Preserve observed, reported,

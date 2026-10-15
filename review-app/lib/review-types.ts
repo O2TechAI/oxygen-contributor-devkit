@@ -138,6 +138,10 @@ export type Review = {
   generatedAt: string;
   updatedAt: string;
   revisionCount: number;
+  /** Saved revision version; optional only for historical in-memory fixtures. */
+  version?: number;
+  /** Increases when history is sanitized. Do not reuse cached older history. */
+  privacyEpoch?: number;
   format: 'legacy' | 'v5';
   protocolVersion: number;
   stage: 'historical' | 'insight' | 'redaction';
@@ -150,6 +154,8 @@ export type Review = {
 };
 
 export type ReviewSavePayload = {
+  expectedVersion?: number;
+  requestId?: string;
   trajectorySummary: TrajectorySummary;
   summaryGroups: SummaryGroup[];
   summaryLines: SummaryLine[];
@@ -180,3 +186,48 @@ export type ReviewHierarchy = Pick<
       'format' | 'protocolVersion' | 'stage' | 'privacyStatus' | 'provenance'
     >
   >;
+
+/** Exact saved content, without embedded originals or export-time decisions. */
+export type ReviewState = {
+  trajectorySummary: Omit<TrajectorySummary, 'originalText'>;
+  summaryGroups: Omit<SummaryGroup, 'originalText'>[];
+  summaryLines: Omit<SummaryLine, 'originalText'>[];
+  insights: Omit<Insight, 'originalText'>[];
+  status: Review['status'];
+};
+
+export type ReviewHistorySnapshot = {
+  version: number;
+  requestId?: string;
+  kind: 'initial' | 'edit' | 'privacy';
+  createdAt: string;
+  note: string;
+  state: ReviewState;
+};
+
+export type ReviewHistory = {
+  review: Review;
+  snapshots: ReviewHistorySnapshot[];
+};
+
+export type ReviewWriteResult = {
+  review: Review;
+  savedVersion: number;
+  requestId: string;
+  replayed?: boolean;
+};
+
+export type ReviewPrivacyPayload = {
+  /** Only the sanitized current baseline is retained. */
+  state: ReviewState;
+  projectName: string;
+  expectedVersion: number;
+  /** Opaque UUID, never derived from private request text. */
+  requestId: string;
+  approvedInsightIds?: string[];
+};
+
+export type ReviewPrivacyResult = ReviewWriteResult & {
+  archiveName: string;
+  url: string;
+};

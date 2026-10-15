@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Autosave } from './autosave.ts';
+import { Autosave, SaveConflictError } from './autosave.ts';
 
 void test('debounces rapid edits and flushes the latest value before export', async () => {
   const saved: number[] = [];
@@ -65,4 +65,30 @@ void test('failed writes block export and retain edits for explicit retry', asyn
   assert.equal(await queue.flush(), true);
   assert.equal(queue.hasPending, false);
   assert.equal(states.at(-1), 'saved');
+});
+
+void test('stale version blocks every retry and retains new drafts until explicit reconciliation', async () => {
+  const attempted: number[] = [];
+  const queue = new Autosave<number>(
+    async (value) => {
+      attempted.push(value);
+      throw new SaveConflictError('Saved version changed.');
+    },
+    () => {},
+    5,
+  );
+  queue.enqueue(1);
+  assert.equal(await queue.flush(), false);
+  assert.equal(queue.isConflicted, true);
+  queue.enqueue(2);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(await queue.flush(), false);
+  assert.deepEqual(attempted, [1]);
+  assert.equal(queue.hasPending, true);
+  queue.discardAfterReconciliation();
+  assert.equal(queue.hasPending, false);
+  assert.equal(queue.isConflicted, false);
+  queue.enqueue(3);
+  await queue.flush();
+  assert.deepEqual(attempted, [1, 3]);
 });
