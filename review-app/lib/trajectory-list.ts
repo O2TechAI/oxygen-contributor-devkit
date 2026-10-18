@@ -7,12 +7,34 @@ export function trajectoryIdentity(sourcePath: string, fallbackId: string) {
     : { key: fallbackId, run: 'Other reviews', number: '' };
 }
 
-export function reviewVersion(review: Pick<Review, 'privacyStatus'>) {
-  return review.privacyStatus === 'redacted'
-    ? 'Redacted'
-    : review.privacyStatus === 'unredacted'
-      ? 'Original'
-      : 'Review';
+type ReviewStage = Pick<Review, 'privacyStatus'> & Partial<Pick<Review, 'stage'>>;
+
+export function isExtractionDraft(review: ReviewStage) {
+  return (
+    review.stage === 'insight' ||
+    (review.privacyStatus === 'unredacted' && review.stage !== 'humanize')
+  );
+}
+
+export function reviewVersion(review: ReviewStage) {
+  if (isExtractionDraft(review)) return 'Extraction draft';
+  if (review.privacyStatus === 'redacted') return 'Redacted';
+  if (review.stage === 'humanize') return 'Unredacted';
+  return 'Review';
+}
+
+export function reviewContentLabel(review: ReviewStage) {
+  const version = reviewVersion(review);
+  return version === 'Unredacted' || version === 'Redacted'
+    ? `${version} insights and summary`
+    : version;
+}
+
+/** Keep raw extraction out of normal navigation; explicit links still work. */
+export function visibleReviews(reviews: Review[], activeId = '') {
+  return reviews.filter(
+    (review) => !isExtractionDraft(review) || review.id === activeId,
+  );
 }
 
 export function defaultReviewSelection(reviews: Review[], run: string) {
@@ -89,8 +111,10 @@ export function filterTrajectories(
       (review) =>
         (review.privacyStatus === 'redacted' ||
           review.privacyStatus === 'unredacted') &&
-        (filters.version === 'all' ||
-          reviewVersion(review).toLowerCase() === filters.version) &&
+        (filters.version === 'all'
+          ? !isExtractionDraft(review) ||
+            (filters.selectedOnly && selected.has(review.id))
+          : reviewVersion(review).toLowerCase() === filters.version) &&
         (filters.status === 'all' || review.status === filters.status) &&
         (!filters.selectedOnly || selected.has(review.id)) &&
         (!query ||

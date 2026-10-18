@@ -121,6 +121,8 @@ export function normalizeInsightType(value?: string) {
 }
 
 export type ReviewProvenance = {
+  sourceKind?: 'saved-review-humanization';
+  draftHashVerified?: boolean;
   manifestSha256?: string;
   inputSha256?: string;
   artifactHashes?: Record<string, string>;
@@ -144,7 +146,7 @@ export type Review = {
   privacyEpoch?: number;
   format: 'legacy' | 'v5';
   protocolVersion: number;
-  stage: 'historical' | 'insight' | 'redaction';
+  stage: 'historical' | 'insight' | 'humanize' | 'redaction';
   privacyStatus: 'unknown' | 'unredacted' | 'redacted';
   provenance: ReviewProvenance;
   trajectorySummary: TrajectorySummary;
@@ -169,7 +171,7 @@ export type ReviewCreatePayload = {
   sourcePath: string;
   format?: 'legacy' | 'v5';
   protocolVersion?: number;
-  stage?: 'insight' | 'redaction';
+  stage?: 'insight' | 'humanize' | 'redaction';
   summaryMarkdown: string;
   summaryLabeledMarkdown?: string;
   insightMarkdown: string;

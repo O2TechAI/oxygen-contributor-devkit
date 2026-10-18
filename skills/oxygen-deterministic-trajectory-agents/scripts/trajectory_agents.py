@@ -40,12 +40,19 @@ PROTOCOL_VERSION = 9
 STAGES = {
     "summary": ("summary.md", ("summary.md", "summary_labeled.md")),
     "insight": ("insight.md", ("summary.md", "summary_labeled.md", "insight.md")),
+    "humanize": ("humanize.md", ("summary.md", "summary_labeled.md", "insight.md")),
     "redaction": ("sensitive-redaction.md", (
         "summary_redacted.md", "summary_redacted_labeled.md", "insight_redacted.md",
     )),
 }
 CARD_FORMAT = KIT / "prompts" / "insight-card-format.md"
 CATEGORY_REFERENCE = KIT / "prompts" / "insight_categories.md"
+HUMANIZER_ROOT = KIT / "skills/humanizer"
+HUMANIZER_WRAPPER = KIT / "prompts/humanize.md"
+HUMANIZER_SCRIPT = KIT / "tools" / "humanizer_protocol.py"
+HUMANIZER_SPEC = importlib.util.spec_from_file_location("oxygen_humanizer", HUMANIZER_SCRIPT)
+HUMANIZER = importlib.util.module_from_spec(HUMANIZER_SPEC)
+HUMANIZER_SPEC.loader.exec_module(HUMANIZER)
 CARD_SCRIPT = SKILL / "scripts" / "insight_cards.py"
 CARD_SPEC = importlib.util.spec_from_file_location("oxygen_insight_cards", CARD_SCRIPT)
 CARDS = importlib.util.module_from_spec(CARD_SPEC)
@@ -98,7 +105,8 @@ def paths(value):
 def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex"):
     notes = b"# Host notes\n\n" + HOST_NOTES[host].encode() + b"\n\n"
     wrapper = notes + (SKILL / "references" / f"{stage}-worker.md").read_bytes()
-    prompt = (KIT / "prompts" / STAGES[stage][0]).read_bytes()
+    prompt = (HUMANIZER.instructions(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER)) if stage == "humanize"
+              else (KIT / "prompts" / STAGES[stage][0]).read_bytes())
     # Preserve the exact prompt file inside the message, including its final newline.
     helper = b""
     if stage in {"insight", "redaction"}:
@@ -134,13 +142,15 @@ def host_settings(host="codex", model=None):
 def configuration(host="codex", model=None):
     return {
         "protocol_version": PROTOCOL_VERSION,
+        "stage_order": list(STAGES),
         **host_settings(host, model),
         "helper_sha256": sha(Path(__file__).read_bytes()),
         "labeler_sha256": sha(LABEL_SCRIPT.read_bytes()),
         "card_parser_sha256": sha(CARD_SCRIPT.read_bytes()),
         "card_format_sha256": sha(CARD_FORMAT.read_bytes()),
         "template_sha256": {stage: sha(fixed_template(stage, host=host)) for stage in STAGES},
-        "prompt_sha256": {stage: sha((KIT / "prompts" / STAGES[stage][0]).read_bytes()) for stage in STAGES},
+        "prompt_sha256": {stage: sha((HUMANIZER_WRAPPER if stage == "humanize" else
+                                      KIT / "prompts" / STAGES[stage][0]).read_bytes()) for stage in STAGES},
         "tools_and_sandbox": "inherited from the host; not independently configurable by this tool",
     }
 
@@ -231,10 +241,13 @@ def prepare(value, *, host="codex", model=None):
     protocol.mkdir(mode=0o700)
     protocol.chmod(0o700)
     snapshots = {"label_summary_lines.py": LABEL_SCRIPT.read_bytes(),
+                 "humanizer_protocol.py": HUMANIZER_SCRIPT.read_bytes(),
                  "insight_cards.py": CARD_SCRIPT.read_bytes()}
+    snapshots.update(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER))
     snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host)
                       for stage in STAGES})
     for name, content in snapshots.items():
+        (protocol / name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         write_new(protocol / name, content)
     manifest = {
         "input_path": str(source), "input_sha256": sha(data), "input_bytes": len(data),
@@ -255,6 +268,14 @@ def load_run(source, run):
     if manifest["frozen_file"] != frozen_name:
         raise RunError("frozen_path_mismatch")
     return manifest
+
+
+def stage_order(manifest):
+    # Saved v7-v9 runs predate Humanizer and retain their three-stage lifecycle.
+    stages = manifest["configuration"].get("stage_order", ["summary", "insight", "redaction"])
+    if stages not in (["summary", "insight", "redaction"], list(STAGES)):
+        raise RunError("unsupported_stage_order")
+    return stages
 
 
 def validate_summary(data, allow_empty=False):
@@ -293,9 +314,17 @@ def validate_outputs(run, stage):
     validate_summary(summary, allow_empty=stage == "redaction")
     if data[names[1]] != labeler.label_bytes(summary):
         raise RunError("labeled_summary_mismatch")
-    if stage in {"insight", "redaction"}:
+    if stage in {"insight", "humanize", "redaction"}:
         cards = parse_insights(data[names[2]], summary, labeler, run_helper(run, "insight_cards.py"))
         count = len(cards)
+        if stage == "humanize":
+            for name in STAGES["summary"][1]:
+                if data[name] != read_regular(run / "insight" / name):
+                    raise RunError("humanizer_changed_summary")
+            original = read_regular(run / "insight/insight.md")
+            before = parse_insights(original, summary, labeler, run_helper(run, "insight_cards.py"))
+            run_helper(run, "humanizer_protocol.py").validate_preservation(
+                before, cards, original, data[names[2]])
     for name in data:
         (directory / name).chmod(0o600)
     return {
@@ -388,30 +417,45 @@ def require_completed(manifest, stage):
 def verify_resume(value):
     """Check integrity once on recovery, without rereading the original input."""
     def verify(source, run, manifest):
-        if sha(read_regular(run / manifest["frozen_file"])) != manifest["input_sha256"]:
-            raise RunError("input_hash_mismatch")
-        for name, digest in manifest["protocol_sha256"].items():
-            if sha(read_regular(run / "protocol" / name)) != digest:
-                raise RunError("saved_protocol_changed")
-        for stage, state in manifest["stages"].items():
-            if state["status"] == "complete":
-                for name, digest in state["outputs"]["sha256"].items():
-                    if sha(read_regular(run / stage / name)) != digest:
-                        raise RunError(f"{stage}_outputs_changed")
+        verify_files(run, manifest)
         return {"status": "verified", "run_complete": manifest["complete"]}
     return locked(value, verify)
 
 
+def verify_files(run, manifest):
+    if sha(read_regular(run / manifest["frozen_file"])) != manifest["input_sha256"]:
+        raise RunError("input_hash_mismatch")
+    for name, digest in manifest["protocol_sha256"].items():
+        if sha(read_regular(run / "protocol" / name)) != digest:
+            raise RunError("saved_protocol_changed")
+    for stage, state in manifest["stages"].items():
+        if "humanize" in stage_order(manifest) and state.get("call_sha256"):
+            if sha(read_regular(run / f"{stage}-call.json")) != state["call_sha256"]:
+                raise RunError(f"{stage}_dispatch_changed")
+        if state["status"] == "complete":
+            for name, digest in state["outputs"]["sha256"].items():
+                if sha(read_regular(run / stage / name)) != digest:
+                    raise RunError(f"{stage}_outputs_changed")
+
+
 def issue_call(value, stage):
     def issue(source, run, manifest):
+        stages = stage_order(manifest)
+        if stage not in stages:
+            raise RunError("stage_unavailable_in_saved_run")
+        if stage == "humanize" or (stage == "redaction" and "humanize" in stages):
+            verify_files(run, manifest)
         if stage in manifest["stages"]:
             raise RunError("dispatch_already_issued_reconcile_existing_agent")
-        for previous in list(STAGES)[:list(STAGES).index(stage)]:
+        for previous in stages[:stages.index(stage)]:
             require_completed(manifest, previous)
         if stage == "insight":
             # Preserve the accepted first draft; revisions belong to the insight stage.
             for name in STAGES["summary"][1]:
                 write_new(run / "insight" / name, read_regular(run / "summary" / name))
+        if stage == "humanize":
+            for name in STAGES["summary"][1]:
+                write_new(run / "humanize" / name, read_regular(run / "insight" / name))
         args = call_arguments(stage, source, config=manifest["configuration"],
                               template=read_regular(run / "protocol" / f"{stage}-template.md"))
         # Save the exact call and claim before emitting it. A crash never causes a blind retry.
@@ -425,6 +469,8 @@ def issue_call(value, stage):
 def record_worker(value, stage, worker_id):
     """Record the actual host worker immediately after dispatch (or reconciliation)."""
     def record(source, run, manifest):
+        if stage == "humanize":
+            verify_files(run, manifest)
         state = manifest["stages"].get(stage, {})
         if state.get("status") not in {"issued", "complete"} or state.get("origin"):
             raise RunError("dispatch_not_issued")
@@ -441,6 +487,8 @@ def record_worker(value, stage, worker_id):
 def accept(value, stage, *, worker_id=None, worker_status=None):
     """Accept an output using completion observed by the host, not by this CLI."""
     def finish(source, run, manifest):
+        if stage == "humanize" or (stage == "redaction" and "humanize" in stage_order(manifest)):
+            verify_files(run, manifest)
         state = manifest["stages"].get(stage, {})
         if state.get("origin") == "imported_summary":
             raise RunError("summary_imported_no_worker_to_accept")
@@ -451,13 +499,22 @@ def accept(value, stage, *, worker_id=None, worker_status=None):
         if worker_id != state["worker_id"]:
             raise RunError("worker_id_mismatch")
         if worker_status != "complete":
+            if stage == "humanize":
+                state.update(status="failed", worker_status=worker_status, error="worker_not_complete")
+                save_manifest(run, manifest)
             raise RunError("worker_not_complete")
         if state["status"] == "complete":
             return {"stage": stage, "status": "complete", **state["outputs"],
                     "run_complete": manifest["complete"]}
         if stage == "summary":
             prepare_summary_labels(run)
-        outputs = validate_outputs(run, stage)
+        try:
+            outputs = validate_outputs(run, stage)
+        except (ValueError, OSError, KeyError):
+            if stage == "humanize":
+                state.update(status="failed", worker_status=worker_status, error="invalid_humanizer_output")
+                save_manifest(run, manifest)
+            raise
         state.update(status="complete", worker_status=worker_status, outputs=outputs)
         manifest["complete"] = stage == "redaction" or manifest["complete"]
         save_manifest(run, manifest)
@@ -478,11 +535,15 @@ async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model
         verify_resume(source)
     else:
         prepare(source, host=host, model=model)
-    stages = list(STAGES) if redact else ["summary", "insight"]
+    stages = stage_order(load_run(source, run))
+    if not redact:
+        stages = [stage for stage in stages if stage != "redaction"]
     for stage in stages:
         state = load_run(source, run)["stages"].get(stage, {})
         if state.get("status") == "complete":
             continue
+        if state.get("status") == "failed":
+            raise RunError("stage_failed_use_new_run")
         if state:
             worker_id = state.get("worker_id")
             if not worker_id:
@@ -493,6 +554,8 @@ async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model
             record_worker(source, stage, worker_id)
         result = await wait(worker_id)
         if not isinstance(result, dict) or result.get("status") != "complete":
+            if stage == "humanize":
+                accept(source, stage, worker_id=worker_id, worker_status="error")
             raise RunError("worker_not_complete")
         accept(source, stage, worker_id=worker_id, worker_status=result["status"])
     manifest = load_run(source, run)
@@ -501,7 +564,7 @@ async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "prepare-insight", "summary-call", "accept-summary", "insight-call", "accept-insight", "redaction-call", "accept-redaction", "record-worker", "verify-resume"))
+    parser.add_argument("action", choices=("prepare", "prepare-insight", "summary-call", "accept-summary", "insight-call", "accept-insight", "humanize-call", "accept-humanize", "redaction-call", "accept-redaction", "record-worker", "verify-resume"))
     parser.add_argument("input_path", help="The only per-item parameter; a frozen JSON/JSONL or Markdown trajectory, or existing Markdown summary")
     parser.add_argument("--from-run", help="For prepare-insight only: prior run with an accepted summary; input_path must be new")
     parser.add_argument("--stage", choices=STAGES, help="Stage for record-worker")

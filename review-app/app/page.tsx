@@ -60,7 +60,9 @@ import { exportLabelingSummary } from '@/lib/export-labeling';
 import {
   defaultReviewSelection,
   groupTrajectories,
+  reviewContentLabel,
   trajectoryIdentity,
+  visibleReviews,
 } from '@/lib/trajectory-list';
 import {
   reviewerInsightExample,
@@ -176,7 +178,10 @@ export default function Home() {
   const [exportIds, setExportIds] = useState<string[]>([]);
   const [exportWarningOpen, setExportWarningOpen] = useState(false);
 
-  const active = reviews.find((review) => review.id === activeId) ?? reviews[0];
+  const navigationReviews = visibleReviews(reviews, activeId);
+  const active =
+    navigationReviews.find((review) => review.id === activeId) ??
+    navigationReviews[0];
   const activeRef = useRef(active);
   const editorRef = useRef(editorTarget);
   const [revisionClient] = useState(() => new ReviewRevisionClient());
@@ -335,7 +340,8 @@ export default function Home() {
             'review',
           );
           const requested = loaded.find((review) => review.id === requestedId);
-          const fallback = requested ?? loaded[0];
+          const fallback = requested ?? visibleReviews(loaded)[0];
+          if (!fallback) return;
           setActiveId((current) =>
             loaded.some((review) => review.id === current)
               ? current
@@ -1035,7 +1041,9 @@ export default function Home() {
           <FilePlus2 className="mx-auto size-8 text-muted-foreground" />
           <h1 className="mt-4 text-lg font-semibold">No reviews waiting</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Verified Oxygen runs will appear here after publication.
+            Humanized or redacted insights and summaries will appear here after
+            import. Older extraction drafts remain available through their
+            review links.
           </p>
           {saveError && (
             <p className="mt-3 text-sm text-destructive">{saveError}</p>
@@ -1095,7 +1103,7 @@ export default function Home() {
             title={labels.get(active.id)}
             className="h-7 w-full min-w-0 max-w-xl flex-1 basis-48 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {reviews.map((review) => (
+            {navigationReviews.map((review) => (
               <option key={review.id} value={review.id}>
                 {labels.get(review.id)}
               </option>
@@ -1116,7 +1124,7 @@ export default function Home() {
               ) : (
                 <AlertTriangle className="size-3" />
               )}
-              {active.privacyStatus === 'redacted' ? 'Redacted' : 'Unredacted'}
+              {reviewContentLabel(active)}
             </Badge>
           )}
         </div>

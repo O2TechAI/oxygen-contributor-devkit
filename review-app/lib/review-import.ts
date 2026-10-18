@@ -24,7 +24,9 @@ export function isReviewCreatePayload(
     return (
       typeof payload.summaryLabeledMarkdown === 'string' &&
       typeof payload.manifestJson === 'string' &&
-      (payload.stage === 'insight' || payload.stage === 'redaction')
+      (payload.stage === 'insight' ||
+        payload.stage === 'humanize' ||
+        payload.stage === 'redaction')
     );
   }
   return (
@@ -51,6 +53,8 @@ export async function parseReviewImportFile(text: string) {
 }
 
 type RunManifest = {
+  format?: string;
+  reviewerAddedIds?: string[];
   complete?: boolean;
   input_sha256?: string;
   configuration?: {
@@ -90,6 +94,17 @@ export async function parseV5Review(payload: ReviewCreatePayload) {
   if (manifest?.configuration?.protocol_version !== payload.protocolVersion) {
     throw new Error(
       'The run manifest protocol version does not match the payload.',
+    );
+  }
+  const reviewDraft = manifest.format === 'oxygen-review-humanization/v1';
+  if (
+    reviewDraft &&
+    (payload.stage !== 'humanize' ||
+      payload.protocolVersion !== 9 ||
+      manifest.complete !== false)
+  ) {
+    throw new Error(
+      'A saved-review Humanizer draft must be unredacted protocol v9.',
     );
   }
   const stage = manifest.stages?.[payload.stage];
@@ -133,6 +148,19 @@ export async function parseV5Review(payload: ReviewCreatePayload) {
     summaryLines,
     payload.protocolVersion,
   );
+  if (reviewDraft) {
+    const added = manifest.reviewerAddedIds;
+    if (
+      !Array.isArray(added) ||
+      new Set(added).size !== added.length ||
+      added.some((id) => !insights.some((insight) => insight.id === id))
+    ) {
+      throw new Error('Invalid reviewer authorship in the Humanizer draft.');
+    }
+    for (const insight of insights) {
+      if (added.includes(insight.id)) insight.authorship = 'reviewer';
+    }
+  }
   const hierarchy: ReviewHierarchy = {
     trajectorySummary: { originalText: '', text: '' },
     summaryGroups: [],
@@ -141,8 +169,14 @@ export async function parseV5Review(payload: ReviewCreatePayload) {
     stage: payload.stage,
     privacyStatus: payload.stage === 'redaction' ? 'redacted' : 'unredacted',
     provenance: {
+      ...(reviewDraft
+        ? {
+            sourceKind: 'saved-review-humanization' as const,
+            draftHashVerified: true,
+          }
+        : {}),
       manifestSha256: await sha256(payload.manifestJson),
-      inputSha256: manifest.input_sha256,
+      inputSha256: reviewDraft ? undefined : manifest.input_sha256,
       artifactHashes: Object.fromEntries(
         Object.keys(contents).map((name) => [
           name,
@@ -151,7 +185,7 @@ export async function parseV5Review(payload: ReviewCreatePayload) {
       ),
       model: manifest.configuration.model,
       reasoningEffort: manifest.configuration.reasoning_effort,
-      hashVerified: true,
+      hashVerified: !reviewDraft,
       runComplete: manifest.complete === true,
     },
   };

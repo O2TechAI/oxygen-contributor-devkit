@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/sheet';
 import { parseReviewImportFile } from '@/lib/review-import';
 import type { Review } from '@/lib/review-types';
+import { reviewContentLabel } from '@/lib/trajectory-list';
 
 export function ImportReview({
   disabled = false,
@@ -135,12 +136,16 @@ export function ImportReview({
                 Protocol v{prepared.payload.protocolVersion} ·{' '}
                 {prepared.review.insights.length} insights
               </p>
-              <p className="capitalize">
-                {prepared.review.hierarchy.privacyStatus} ·{' '}
-                {prepared.payload.stage} stage
+              <p>
+                {reviewContentLabel({
+                  stage: prepared.payload.stage,
+                  privacyStatus: prepared.review.hierarchy.privacyStatus ?? 'unknown',
+                })}
               </p>
               <p className="text-muted-foreground">
-                Manifest hashes, fields, and citations verified.
+                {prepared.review.hierarchy.provenance?.draftHashVerified
+                  ? 'Humanized from a saved review. Draft files and citations verified; original extraction provenance unavailable.'
+                  : 'Manifest hashes, fields, and citations verified.'}
               </p>
             </div>
           )}

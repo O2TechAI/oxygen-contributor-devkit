@@ -1,4 +1,4 @@
 interface:
   display_name: "Oxygen Cross-Session Generation"
   short_description: "Extract recurring workflows and user requirements"
-  default_prompt: "Use $oxygen-cross-session-generation to extract recurring user-specific workflows and detailed implementation procedures from this completed Oxygen review-export directory."
+  default_prompt: "Use $oxygen-cross-session-generation to extract recurring user-specific workflows and detailed implementation procedures from this completed Oxygen review-export directory, then humanize the resulting drafts."

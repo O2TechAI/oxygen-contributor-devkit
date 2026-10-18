@@ -15,7 +15,7 @@ routine approval step is needed.
 
 1. Resolve the browser's `review` and `insight` query parameters against the
    saved review. If a card is not identified, use the user's title or description;
-   ask when more than one target fits. Distinguish original and redacted reviews.
+   ask when more than one target fits. Distinguish original, humanized, and redacted reviews.
    Resolve the actual API address from the local server metadata: a browser's
    forwarded port may differ from the server port. Confirm that the server's
    recorded host matches the current workspace host and that the service responds
@@ -35,6 +35,16 @@ routine approval step is needed.
    active backup writers first: the helper replaces cold backup copies.
 3. Run `python3 scripts/review.py read ARCHIVE` immediately before editing.
    Save its result to a private working JSON file and edit its `state`.
+   For insight rewrites or additions, read the local
+   [Humanizer skill](../humanizer/SKILL.md) and apply its embedded writing pass
+   within this step. Use it on the cards being edited, leaving unrelated cards
+   untouched. Prioritize comfortable pacing and lower information density: omit
+   incidental detail, explain unfamiliar terms, and keep useful headings, lists,
+   tables, and code. Retain defining requirements, exceptions, attribution, and
+   outcome qualifications. The user's requested operations and this review
+   procedure take precedence over upstream formatting or output advice. Finish
+   by comparing the edited cards with their prior text and supporting summary.
+   This is part of the editing agent's work, not a separate extraction worker.
    **Ground insight edits and additions in the existing saved summary.** Check
    the revised claims, workflow, and examples against that summary; existing
    Evidence labels can remain unchanged. Include content unsupported by the
@@ -72,6 +82,9 @@ routine approval step is needed.
 The script's `--help` describes arguments and environment-based authentication.
 Credentials do not belong in archives or command-line arguments. The helper's
 snapshots preserve actual decisions; contribution exports are not snapshots.
+Archive writes use an atomic `.operation-lock` directory. After an interrupted
+operation, confirm no helper is still using the archive and reconcile any saved
+pending request before removing a stale claim and retrying with the same request ID.
 The fixed layout is `session.json`, `0000-initial/{snapshot.json,insights.md}`, and
 one numbered directory per request containing `request.md`, `snapshot.json`,
 `insights.md`, `changes.diff`, and `receipt.json`.
