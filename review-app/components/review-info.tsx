@@ -10,18 +10,25 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 
-export function ReviewInfo({ review }: { review: Review }) {
+export function ReviewInfo({
+  review,
+  showLabel = false,
+}: {
+  review: Review;
+  showLabel?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
+        size={showLabel ? 'default' : 'icon-sm'}
         aria-label="Page information"
         title="Page information"
         onClick={() => setOpen(true)}
       >
         <Info />
+        {showLabel && 'Page information'}
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent className="overflow-y-auto">
@@ -57,7 +64,9 @@ export function ReviewInfo({ review }: { review: Review }) {
               <dd>
                 {review.provenance.hashVerified
                   ? 'Manifest hashes verified'
-                  : 'Example data'}
+                  : review.reviewLevel === 'global'
+                    ? 'Imported global candidates; source authenticity and privacy not certified'
+                    : 'Example data'}
               </dd>
             </div>
             {review.provenance.model && (

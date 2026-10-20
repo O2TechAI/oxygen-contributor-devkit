@@ -125,5 +125,4 @@ include illustrative events that did not occur.
 The helper produces `oxygen-cross-session-candidates/v2` JSON from the Markdown.
 Each candidate contains its ID and six fields; all candidates have
 `status: "draft"`. This format does not change source protocol v9 or imply review
-approval. These artifacts are private candidates pending human review, not a
-review-app import or installable skills.
+approval. These artifacts are private candidates pending human review, importable into the review app for a separate global review, not installable skills.

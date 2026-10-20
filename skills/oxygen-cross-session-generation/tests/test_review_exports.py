@@ -143,6 +143,13 @@ class ReviewExportTests(unittest.TestCase):
             entries.append(collection_entry(directory, review, approval))
         write_manifest(self.root, entries)
 
+    def test_global_review_is_not_an_individual_trajectory(self):
+        review = make_review()
+        review["reviewLevel"] = "global"
+        write_export(self.root, review)
+        with self.assertRaisesRegex(ValueError, "second-stage outputs"):
+            self.normalize()
+
     def test_current_edited_cards_preserve_all_identities_and_declines(self):
         write_export(self.root)
         result = self.normalize()

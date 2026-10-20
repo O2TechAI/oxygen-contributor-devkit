@@ -13,7 +13,13 @@ import {
 
 const GUIDE_SEEN = 'oxygen-review-guide-seen-v1';
 
-export function ReviewGuide({ review }: { review: Review }) {
+export function ReviewGuide({
+  review,
+  showLabel = false,
+}: {
+  review: Review;
+  showLabel?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -46,12 +52,13 @@ export function ReviewGuide({ review }: { review: Review }) {
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
+        size={showLabel ? 'default' : 'icon-sm'}
         aria-label="Review help"
         title="Review help"
         onClick={() => changeOpen(true)}
       >
         <CircleHelp />
+        {showLabel && 'Review help'}
       </Button>
       <Sheet open={open} onOpenChange={changeOpen}>
         <SheetContent className="overflow-y-auto sm:max-w-lg">

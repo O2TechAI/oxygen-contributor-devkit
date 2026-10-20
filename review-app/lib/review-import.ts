@@ -1,3 +1,4 @@
+import { parseGlobalReview, globalImportPayload } from './global-review.ts';
 import type { ReviewCreatePayload, ReviewHierarchy } from './review-types.ts';
 import {
   classifySummaryLines,
@@ -20,6 +21,7 @@ export function isReviewCreatePayload(
     typeof payload.insightMarkdown !== 'string'
   )
     return false;
+  if (payload.format === 'global') return Boolean(payload.globalCandidates);
   if (payload.format === 'v5') {
     return (
       typeof payload.summaryLabeledMarkdown === 'string' &&
@@ -40,6 +42,13 @@ export async function parseReviewImportFile(text: string) {
     payload = JSON.parse(text);
   } catch {
     throw new Error('Choose a valid review import JSON file.');
+  }
+  if (
+    (payload as { format?: string })?.format ===
+    'oxygen-cross-session-candidates/v2'
+  ) {
+    const prepared = globalImportPayload(payload);
+    return { payload: prepared, review: await parseGlobalReview(prepared) };
   }
   if (!isReviewCreatePayload(payload) || payload.format !== 'v5') {
     throw new Error(
