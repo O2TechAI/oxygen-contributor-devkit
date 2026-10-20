@@ -10,18 +10,25 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 
-export function ReviewInfo({ review }: { review: Review }) {
+export function ReviewInfo({
+  review,
+  showLabel = false,
+}: {
+  review: Review;
+  showLabel?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
+        size={showLabel ? 'default' : 'icon-sm'}
         aria-label="Page information"
         title="Page information"
         onClick={() => setOpen(true)}
       >
         <Info />
+        {showLabel && 'Page information'}
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent className="overflow-y-auto">

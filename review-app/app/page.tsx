@@ -51,6 +51,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { RichSummary } from '@/components/rich-summary';
 import { ReviewGuide } from '@/components/review-guide';
 import { ReviewInfo } from '@/components/review-info';
+import { ReviewTools } from '@/components/review-tools';
 import { ReviewChanges } from '@/components/review-changes';
 import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
 import { ImportReview } from '@/components/import-review';
@@ -101,12 +102,6 @@ type EditorTarget = {
   mode: 'add' | 'edit';
 } | null;
 type DeleteTarget = { kind: 'summary' | 'insight'; id: string } | null;
-
-function reviewStatusLabel(status: Review['status']) {
-  if (status === 'completed') return 'Completed';
-  if (status === 'in_review') return 'In review';
-  return 'Ready';
-}
 
 function insightStatusLabel(status: InsightStatus) {
   if (status === 'accepted') return 'Accepted';
@@ -1076,40 +1071,124 @@ export default function Home() {
         onOpenChange={setExportWarningOpen}
         onConfirm={downloadActiveReview}
       />
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-background px-3 py-1.5 sm:px-4">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-          <span className="grid size-5 shrink-0 place-items-center rounded-[4px] bg-foreground text-background">
-            <Sparkles className="size-3" />
-          </span>
-          <p
-            className="px-1 text-sm font-medium"
-            title="Human approval workspace"
-          >
-            Oxygen Review
-          </p>
-          <span className="text-sm text-muted-foreground/60">/</span>
-          <select
-            aria-label="Choose trajectory review"
-            disabled={editorTarget !== null}
-            value={active.id}
-            onChange={(event) => chooseReview(event.target.value)}
-            title={labels.get(active.id)}
-            className="h-7 w-full min-w-0 max-w-xl flex-1 basis-48 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {reviews.map((review) => (
-              <option key={review.id} value={review.id}>
-                {labels.get(review.id)}
-              </option>
-            ))}
-          </select>
-          <Badge variant="secondary">{reviewStatusLabel(active.status)}</Badge>
+      <header className="shrink-0 border-b bg-background px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+            <span
+              className="grid size-6 shrink-0 place-items-center rounded-[4px] bg-foreground text-background"
+              title="Oxygen Review"
+            >
+              <Sparkles className="size-3.5" />
+            </span>
+            <select
+              aria-label="Choose review"
+              disabled={editorTarget !== null}
+              value={active.id}
+              onChange={(event) => chooseReview(event.target.value)}
+              title={labels.get(active.id)}
+              className="h-8 w-full min-w-0 max-w-lg flex-1 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {reviews.map((review) => (
+                <option key={review.id} value={review.id}>
+                  {review.id === active.id && review.reviewLevel === 'global'
+                    ? review.projectName
+                    : labels.get(review.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <ReviewChanges
+              key={active.id}
+              reviewId={active.id}
+              version={active.version ?? active.revisionCount}
+            />
+            <div className="flex items-center gap-2">
+              <output
+                aria-label="Review progress"
+                className="text-xs text-muted-foreground"
+              >
+                {active.insights.length - unresolved}/{active.insights.length}{' '}
+                reviewed
+              </output>
+              <Button
+                disabled={
+                  saveState === 'saving' ||
+                  editorTarget !== null ||
+                  !completable
+                }
+                title={
+                  editorTarget !== null
+                    ? 'Apply or cancel your edit before completing'
+                    : completable
+                      ? 'Complete review'
+                      : active.reviewLevel === 'global'
+                        ? 'Resolve every global insight before completing'
+                        : 'Complete a redacted review after resolving every Insight'
+                }
+                onClick={() => persist('completed')}
+              >
+                <Check data-icon="inline-start" />
+                Complete
+              </Button>
+            </div>
+            <ReviewTools>
+              <ImportReview
+                disabled={
+                  dirty || saveState === 'saving' || editorTarget !== null
+                }
+                onImported={openImportedReview}
+              />
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                title={
+                  editorTarget
+                    ? 'Apply or cancel your edit before exporting'
+                    : 'Save pending changes automatically and export'
+                }
+                aria-label="Export reviewed artifacts"
+                onClick={async () => {
+                  if (!(await autosave.flush())) return;
+                  if (exportLabelingSummary([active]).incompleteReviews > 0)
+                    setExportWarningOpen(true);
+                  else await downloadActiveReview();
+                }}
+              >
+                <Download data-icon="inline-start" />
+                Export
+              </Button>
+              <Button variant="ghost" onClick={openBatchExport}>
+                <List data-icon="inline-start" />
+                Trajectories ({groupTrajectories(reviews).length})
+              </Button>
+              <div className="my-1 border-t" />
+              <ReviewGuide review={active} showLabel />
+              <ReviewInfo review={active} showLabel />
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                onClick={handleLogout}
+              >
+                <LogOut data-icon="inline-start" />
+                Sign out
+              </Button>
+            </ReviewTools>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-9 text-xs text-muted-foreground">
+          {active.reviewLevel === 'global' && (
+            <span>
+              Based on {active.globalSources?.length ?? 0} reviewed trajectories
+            </span>
+          )}
           {active.format === 'v5' && (
-            <Badge
-              variant="secondary"
-              className={
-                active.privacyStatus === 'redacted'
-                  ? 'bg-[color:var(--type-explicit-bg)] text-[color:var(--type-explicit-strong)]'
-                  : 'bg-[#ffe2dd] text-[#5d1715]'
+            <span
+              className="inline-flex items-center gap-1"
+              title={
+                active.reviewLevel === 'global'
+                  ? 'Global review does not certify privacy'
+                  : undefined
               }
             >
               {active.privacyStatus === 'redacted' ? (
@@ -1118,119 +1197,34 @@ export default function Home() {
                 <AlertTriangle className="size-3" />
               )}
               {active.reviewLevel === 'global'
-                ? 'Private · global review'
+                ? 'Private'
                 : active.privacyStatus === 'redacted'
                   ? 'Redacted'
                   : 'Unredacted'}
-            </Badge>
+            </span>
           )}
-        </div>
-
-        <div className="flex max-w-full flex-wrap items-center gap-2">
-          <ReviewGuide review={active} />
-          <ReviewInfo review={active} />
-          <ReviewChanges
-            key={active.id}
-            reviewId={active.id}
-            version={active.version ?? active.revisionCount}
-          />
-          <ImportReview
-            disabled={dirty || saveState === 'saving' || editorTarget !== null}
-            onImported={openImportedReview}
-          />
-          <span
-            className={cn(
-              'max-w-64 truncate text-xs',
-              saveState === 'error'
-                ? 'text-destructive'
-                : 'text-muted-foreground',
-            )}
+          {active.status === 'completed' && <span>Completed</span>}
+          <output
+            aria-label="Save status"
+            className={saveState === 'error' ? 'text-destructive' : ''}
             title={saveError}
           >
             {saveState === 'saving'
-              ? 'Autosaving…'
-              : saveState === 'saved'
-                ? `Saved automatically · revision ${active.revisionCount}`
-                : saveState === 'error'
-                  ? saveError || 'Could not save'
-                  : dirty
-                    ? 'Autosave pending…'
-                    : `Revision ${active.revisionCount}`}
-          </span>
-          <Button
-            variant="ghost"
-            disabled={editorTarget !== null}
-            title={
-              editorTarget
-                ? 'Apply or cancel your edit before exporting'
-                : 'Save pending changes automatically and export'
-            }
-            aria-label="Export reviewed artifacts"
-            onClick={async () => {
-              if (!(await autosave.flush())) return;
-              if (exportLabelingSummary([active]).incompleteReviews > 0)
-                setExportWarningOpen(true);
-              else await downloadActiveReview();
-            }}
-          >
-            <Download data-icon="inline-start" />
-            Export
-          </Button>
-          <Button variant="ghost" onClick={openBatchExport}>
-            <List data-icon="inline-start" />
-            Trajectories ({groupTrajectories(reviews).length})
-          </Button>
+              ? 'Saving…'
+              : saveState === 'error'
+                ? saveError || 'Could not save'
+                : dirty
+                  ? 'Unsaved changes'
+                  : 'All changes saved'}
+          </output>
           {saveState === 'error' && dirty && !saveConflict && (
             <Button variant="outline" onClick={() => void autosave.flush()}>
               Retry autosave
             </Button>
           )}
-          <div className="flex items-center gap-2">
-            <output
-              aria-label="Review progress"
-              className="text-xs text-muted-foreground"
-            >
-              {active.insights.length - unresolved}/{active.insights.length}{' '}
-              reviewed
-            </output>
-            <Button
-              disabled={
-                saveState === 'saving' || editorTarget !== null || !completable
-              }
-              title={
-                editorTarget !== null
-                  ? 'Apply or cancel your edit before completing'
-                  : completable
-                    ? 'Complete review'
-                    : active.reviewLevel === 'global'
-                      ? 'Resolve every global insight before completing'
-                      : 'Complete a redacted review after resolving every Insight'
-              }
-              onClick={() => persist('completed')}
-            >
-              <Check data-icon="inline-start" />
-              Complete
-            </Button>
-          </div>
-          <Button
-            variant="ghost"
-            disabled={editorTarget !== null}
-            onClick={handleLogout}
-          >
-            <LogOut data-icon="inline-start" />
-            Sign out
-          </Button>
         </div>
       </header>
 
-      {active.reviewLevel === 'global' && (
-        <div className="border-b bg-emerald-50/60 px-5 py-3 text-sm text-emerald-950">
-          <strong>Global review</strong> · Synthesized from{' '}
-          {active.globalSources?.length} reviewed trajectories. Edit these
-          shared workflows, check their source evidence, then complete this
-          second review. Changes are saved in version history.
-        </div>
-      )}
       {saveConflict && (
         <div
           role="alert"

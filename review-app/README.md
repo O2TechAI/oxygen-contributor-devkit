@@ -11,6 +11,8 @@ and ways to participate. Review help links there in a new tab, opens on first
 use and can be reopened with **Review help**. Dismissing it is remembered in
 this browser. The header shows `3/3 reviewed` beside **Complete**; accepted and
 declined cards both count. This is review progress, not an evaluation score.
+The **More review actions (⋯)** menu contains import, export, the trajectory list,
+help, page information, and sign out. **Changes** and **Complete** remain visible.
 **Page information** contains the source, protocol, stage, verification, and model
 details. The privacy label remains visible in the header. Card prose is shown
 without a nested gray box. These prompts do not collect questionnaire responses.
