@@ -197,7 +197,7 @@ export function isValidV5Review(review: Review, payload: ReviewSavePayload) {
   );
   const canComplete =
     payload.status !== 'completed' ||
-    (review.privacyStatus === 'redacted' &&
+    ((review.privacyStatus === 'redacted' || review.reviewLevel === 'global') &&
       payload.insights.every(
         (insight) =>
           insight.status === 'accepted' || insight.status === 'rejected',

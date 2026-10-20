@@ -18,6 +18,7 @@ import type {
 import { isValidPayload, isValidV5Review } from '@/lib/review-validation';
 import { insightKeys, normalizeInsightType } from '@/lib/review-types';
 import { parseSummary, validateSummaryGroups } from '@/lib/summary-format';
+import { parseGlobalReview } from '@/lib/global-review';
 import { parseV5Review } from '@/lib/review-import';
 import { exportLabelingSummary } from '@/lib/export-labeling';
 import {
@@ -112,6 +113,8 @@ function mapReview(row: ReviewRow): Review {
     revisionCount: Number(row.revision_count || 0),
     version: row.version,
     privacyEpoch: row.privacy_epoch,
+    reviewLevel: currentHierarchy.reviewLevel,
+    globalSources: currentHierarchy.globalSources,
     format: currentHierarchy.format ?? originalHierarchy.format ?? 'legacy',
     protocolVersion:
       currentHierarchy.protocolVersion ??
@@ -170,6 +173,8 @@ function hierarchyFor(review: Review): ReviewHierarchy {
   return {
     trajectorySummary: review.trajectorySummary,
     summaryGroups: review.summaryGroups,
+    reviewLevel: review.reviewLevel,
+    globalSources: review.globalSources,
     format: review.format,
     protocolVersion: review.protocolVersion,
     stage: review.stage,
@@ -276,7 +281,9 @@ export async function createReview(
   let summaryLines: SummaryLine[];
   let insights: Insight[];
   let hierarchy: ReviewHierarchy;
-  if (payload.format === 'v5') {
+  if (payload.format === 'global') {
+    ({ summaryLines, insights, hierarchy } = await parseGlobalReview(payload));
+  } else if (payload.format === 'v5') {
     ({ summaryLines, insights, hierarchy } = await parseV5Review(payload));
   } else {
     const parsed = parseSummary(payload.summaryMarkdown);
@@ -877,6 +884,7 @@ export async function sanitizeReviewHistory(
       ...group,
       originalText: '',
     })),
+    reviewLevel: review.reviewLevel,
     format: review.format,
     protocolVersion: review.protocolVersion,
     stage: 'historical',
@@ -1054,6 +1062,8 @@ function exportReviewSnapshot(review: ExportReview) {
     privacyStatus: review.privacyStatus,
     status: review.status,
     revisionCount: review.revisionCount,
+    reviewLevel: review.reviewLevel,
+    globalSources: review.globalSources,
     exportScope: 'latest',
     exportLabeling: review.exportLabeling,
     current: {

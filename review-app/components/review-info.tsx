@@ -57,7 +57,9 @@ export function ReviewInfo({ review }: { review: Review }) {
               <dd>
                 {review.provenance.hashVerified
                   ? 'Manifest hashes verified'
-                  : 'Example data'}
+                  : review.reviewLevel === 'global'
+                    ? 'Imported global candidates; source authenticity and privacy not certified'
+                    : 'Example data'}
               </dd>
             </div>
             {review.provenance.model && (

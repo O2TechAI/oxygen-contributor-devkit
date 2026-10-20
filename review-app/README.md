@@ -298,3 +298,22 @@ Generalized Workflow recommendations need not all have been demonstrated in the
 historical case. Evidence supports factual claims and the method's origin.
 Rich Markdown is preserved through review and export. Existing reviews,
 annotations, frozen prompts, and validators are not converted.
+
+## Review global insights
+
+After individual reviews are finished, run `oxygen-cross-session-generation` on
+those exports. In **Import review**, select its `cross_session_insights.json`
+(v2) to open a separate **Global review**. The page shows all supplied source
+summaries, clickable qualified evidence such as `S002:L003`, and new pending
+cards. Edit, accept or decline, inspect **Saved changes**, and complete this
+second review. Reloading restores the saved global review and revisions.
+
+The importer checks card structure, citation targets, and support from at least
+two distinct trajectory identities. It does not authenticate the supplied JSON
+or certify its privacy. Global completion records editorial review, not privacy
+approval. The import never edits individual reviews. Local line IDs are used
+for editing and Markdown export; `sourceId` preserves qualified source citations
+and original candidate IDs in the JSON snapshot, alongside the source catalog.
+Global snapshots are second-stage outputs, not new individual extraction inputs.
+The generation command remains a separate agent workflow; importing does not
+start model calls or regenerate candidates in the browser.

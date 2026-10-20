@@ -85,6 +85,12 @@ and draft status; the top-level source catalog retains input review decisions.
 Per-candidate source-card mappings are no longer required or generated.
 Earlier runs retain their saved instructions, helpers, and output requirements.
 
+Import the accepted `cross_session_insights.json` through **Import review** in the
+review app to start a separate global review. All candidates start pending; source
+summaries and qualified citations remain available alongside editable cards and
+saved revision diffs. Completing that review is editorial approval, not privacy
+certification. Do not feed global review exports back as individual trajectories.
+
 The worker writes `cross_session_insights.md` and `completion.json`. Acceptance
 produces `cross_session_insights.json` and `validation.json`. The run also retains frozen
 inputs, guidance, helpers, hashes, bounded-read records, and the dispatch/worker ID.

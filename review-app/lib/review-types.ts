@@ -142,6 +142,8 @@ export type Review = {
   version?: number;
   /** Increases when history is sanitized. Do not reuse cached older history. */
   privacyEpoch?: number;
+  reviewLevel?: 'global';
+  globalSources?: { id: string; reviewId: string; projectName: string }[];
   format: 'legacy' | 'v5';
   protocolVersion: number;
   stage: 'historical' | 'insight' | 'redaction';
@@ -167,7 +169,8 @@ export type ReviewSavePayload = {
 export type ReviewCreatePayload = {
   projectName: string;
   sourcePath: string;
-  format?: 'legacy' | 'v5';
+  format?: 'legacy' | 'v5' | 'global';
+  globalCandidates?: unknown;
   protocolVersion?: number;
   stage?: 'insight' | 'redaction';
   summaryMarkdown: string;
@@ -183,7 +186,13 @@ export type ReviewHierarchy = Pick<
   Partial<
     Pick<
       Review,
-      'format' | 'protocolVersion' | 'stage' | 'privacyStatus' | 'provenance'
+      | 'format'
+      | 'protocolVersion'
+      | 'stage'
+      | 'privacyStatus'
+      | 'provenance'
+      | 'reviewLevel'
+      | 'globalSources'
     >
   >;
 

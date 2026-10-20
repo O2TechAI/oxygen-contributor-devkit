@@ -181,6 +181,7 @@ export function TrajectoryPanel({
                 <option value="all">All versions</option>
                 <option value="original">Original</option>
                 <option value="redacted">Redacted</option>
+                <option value="global">Global</option>
               </select>
               <select
                 aria-label="Filter by review status"

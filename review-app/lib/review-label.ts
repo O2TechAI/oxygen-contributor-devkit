@@ -2,6 +2,11 @@ import type { Review } from './review-types.ts';
 
 export function reviewLabels(reviews: Review[]): Map<string, string> {
   const entries = reviews.map((review) => {
+    if (review.reviewLevel === 'global')
+      return {
+        id: review.id,
+        label: `Global insights · ${review.globalSources?.length ?? 0} trajectories · ${review.projectName}`,
+      };
     const trajectory = review.sourcePath.match(/trajectory[-_ ]?(\d+)/i)?.[1];
     const title = review.summaryLines
       .filter((line) => /^#{1,6}\s+/.test(line.text))

@@ -126,8 +126,9 @@ function nextItemId(ids: string[], prefix: 'L' | 'I') {
 function reviewIsCompletable(review: Review) {
   if (review.format !== 'v5') return true;
   return (
-    review.privacyStatus === 'redacted' &&
-    review.provenance.hashVerified &&
+    (review.reviewLevel === 'global' ||
+      (review.privacyStatus === 'redacted' &&
+        review.provenance.hashVerified)) &&
     review.insights.every(
       (insight) =>
         insight.status === 'accepted' || insight.status === 'rejected',
@@ -1116,7 +1117,11 @@ export default function Home() {
               ) : (
                 <AlertTriangle className="size-3" />
               )}
-              {active.privacyStatus === 'redacted' ? 'Redacted' : 'Unredacted'}
+              {active.reviewLevel === 'global'
+                ? 'Private · global review'
+                : active.privacyStatus === 'redacted'
+                  ? 'Redacted'
+                  : 'Unredacted'}
             </Badge>
           )}
         </div>
@@ -1197,7 +1202,9 @@ export default function Home() {
                   ? 'Apply or cancel your edit before completing'
                   : completable
                     ? 'Complete review'
-                    : 'Complete a redacted review after resolving every Insight'
+                    : active.reviewLevel === 'global'
+                      ? 'Resolve every global insight before completing'
+                      : 'Complete a redacted review after resolving every Insight'
               }
               onClick={() => persist('completed')}
             >
@@ -1216,6 +1223,14 @@ export default function Home() {
         </div>
       </header>
 
+      {active.reviewLevel === 'global' && (
+        <div className="border-b bg-emerald-50/60 px-5 py-3 text-sm text-emerald-950">
+          <strong>Global review</strong> · Synthesized from{' '}
+          {active.globalSources?.length} reviewed trajectories. Edit these
+          shared workflows, check their source evidence, then complete this
+          second review. Changes are saved in version history.
+        </div>
+      )}
       {saveConflict && (
         <div
           role="alert"
@@ -1269,7 +1284,9 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-muted-foreground" />
               <h1 id="summary-heading" className="text-sm font-medium">
-                Summary
+                {active.reviewLevel === 'global'
+                  ? 'Source summaries'
+                  : 'Summary'}
               </h1>
               <span className="text-sm text-muted-foreground">
                 {active.summaryLines.length}
@@ -1324,7 +1341,9 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <Lightbulb className="size-4 text-muted-foreground" />
               <h2 id="insights-heading" className="text-sm font-medium">
-                Insight cards
+                {active.reviewLevel === 'global'
+                  ? 'Global insight cards'
+                  : 'Insight cards'}
               </h2>
               <span className="text-sm text-muted-foreground">
                 {active.insights.length}
@@ -1347,6 +1366,16 @@ export default function Home() {
                   <InsightCard
                     key={insight.id}
                     insight={insight}
+                    evidenceLabels={
+                      active.reviewLevel === 'global'
+                        ? Object.fromEntries(
+                            active.summaryLines.map((line) => [
+                              line.id,
+                              line.sourceId ?? line.id,
+                            ]),
+                          )
+                        : undefined
+                    }
                     skillCandidate={skillCandidates}
                     structured={
                       active.format === 'v5' ||
@@ -1842,6 +1871,7 @@ function InsightCard({
   insight,
   structured,
   skillCandidate,
+  evidenceLabels,
   selected,
   onSelect,
   onEvidence,
@@ -1852,6 +1882,7 @@ function InsightCard({
   insight: Insight;
   structured: boolean;
   skillCandidate: boolean;
+  evidenceLabels?: Record<string, string>;
   selected: boolean;
   onSelect: () => void;
   onEvidence: (lineId: string) => void;
@@ -1989,9 +2020,14 @@ function InsightCard({
               key={line}
               type="button"
               className="rounded-[3px] bg-[color:var(--ui-callout)] px-1.5 py-0.5 font-mono text-xs text-foreground/80 transition-colors hover:bg-[color:var(--evidence-bg)] hover:text-[color:var(--evidence-strong)]"
+              title={
+                evidenceLabels
+                  ? `Source ${evidenceLabels[line] ?? line} · editor line ${line}`
+                  : undefined
+              }
               onClick={() => onEvidence(line)}
             >
-              {line}
+              {evidenceLabels?.[line] ?? line}
             </button>
           ))}
           {!insight.evidence.length && (

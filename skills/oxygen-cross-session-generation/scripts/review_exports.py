@@ -256,6 +256,8 @@ def _read_source(directory: str, data: dict[str, bytes], metadata: dict | None) 
 
     snapshot_path, approval_path = filename("review.json"), filename("approval.json")
     snapshot = _json(raw("review.json"), snapshot_path)
+    if snapshot.get("reviewLevel") == "global":
+        _fail(snapshot_path, "global reviews are second-stage outputs, not individual trajectories")
     approval = _json(raw("approval.json"), approval_path)
     _equal(snapshot.get("format"), "oxygen-review-snapshot/v1", f"{snapshot_path}.format")
     _equal(approval.get("format"), "oxygen-human-review/v1", f"{approval_path}.format")

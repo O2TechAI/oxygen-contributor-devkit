@@ -7,7 +7,10 @@ export function trajectoryIdentity(sourcePath: string, fallbackId: string) {
     : { key: fallbackId, run: 'Other reviews', number: '' };
 }
 
-export function reviewVersion(review: Pick<Review, 'privacyStatus'>) {
+export function reviewVersion(
+  review: Pick<Review, 'privacyStatus' | 'reviewLevel'>,
+) {
+  if (review.reviewLevel === 'global') return 'Global';
   return review.privacyStatus === 'redacted'
     ? 'Redacted'
     : review.privacyStatus === 'unredacted'
@@ -87,7 +90,8 @@ export function filterTrajectories(
     if (!filters.selectedOnly && group.run !== filters.run) return [];
     const reviews = group.reviews.filter(
       (review) =>
-        (review.privacyStatus === 'redacted' ||
+        (review.reviewLevel === 'global' ||
+          review.privacyStatus === 'redacted' ||
           review.privacyStatus === 'unredacted') &&
         (filters.version === 'all' ||
           reviewVersion(review).toLowerCase() === filters.version) &&

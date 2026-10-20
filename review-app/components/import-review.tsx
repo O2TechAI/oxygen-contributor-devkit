@@ -105,11 +105,11 @@ export function ImportReview({
       </SheetTrigger>
       <SheetContent showCloseButton={!pending}>
         <SheetHeader>
-          <SheetTitle>Import a trajectory review</SheetTitle>
+          <SheetTitle>Import a review</SheetTitle>
           <SheetDescription>
-            Choose a prepared run JSON file. Its recorded version determines the
-            card fields. Importing creates a separate review with pending
-            decisions.
+            Choose a prepared individual run or cross_session_insights.json.
+            Global insights open as a separate review with source summaries and
+            new pending decisions.
           </SheetDescription>
         </SheetHeader>
         <div className="space-y-4 overflow-y-auto px-4">
@@ -140,7 +140,9 @@ export function ImportReview({
                 {prepared.payload.stage} stage
               </p>
               <p className="text-muted-foreground">
-                Manifest hashes, fields, and citations verified.
+                {prepared.payload.format === 'global'
+                  ? 'Global candidates and source citations checked. Privacy has not been certified.'
+                  : 'Manifest hashes, fields, and citations verified.'}
               </p>
             </div>
           )}
