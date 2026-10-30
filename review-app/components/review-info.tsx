@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Info } from 'lucide-react';
 import type { Review } from '@/lib/review-types';
+import { reviewContentLabel } from '@/lib/trajectory-list';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -52,6 +53,10 @@ export function ReviewInfo({
               <dd>Protocol v{review.protocolVersion}</dd>
             </div>
             <div>
+              <dt>Version</dt>
+              <dd>{reviewContentLabel(review)}</dd>
+            </div>
+            <div>
               <dt>Stage</dt>
               <dd className="capitalize">{review.stage} stage</dd>
             </div>
@@ -62,13 +67,21 @@ export function ReviewInfo({
             <div>
               <dt>Verification</dt>
               <dd>
-                {review.provenance.hashVerified
-                  ? 'Manifest hashes verified'
-                  : review.reviewLevel === 'global'
-                    ? 'Imported global candidates; source authenticity and privacy not certified'
-                    : 'Example data'}
+                {review.reviewLevel === 'global'
+                  ? 'Imported global candidates; source authenticity and privacy not certified'
+                  : review.provenance.draftHashVerified
+                    ? 'Humanized draft verified; original extraction provenance unavailable'
+                    : review.provenance.hashVerified
+                      ? 'Manifest hashes verified'
+                      : 'Original provenance unavailable'}
               </dd>
             </div>
+            {review.provenance.sourceKind === 'saved-review-humanization' && (
+              <div>
+                <dt>Origin</dt>
+                <dd>Humanized from a saved review</dd>
+              </div>
+            )}
             {review.provenance.model && (
               <div>
                 <dt>Model</dt>

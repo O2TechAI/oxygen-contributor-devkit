@@ -18,6 +18,7 @@ import {
   decisionCounts,
   filterTrajectories,
   groupTrajectories,
+  reviewContentLabel,
   reviewVersion,
   trajectoryIdentity,
 } from '@/lib/trajectory-list';
@@ -144,7 +145,8 @@ export function TrajectoryPanel({
           <SheetDescription>
             Choose trajectories, review their versions, and download your
             selection together. Redacted versions are selected by default;
-            originals can be selected manually.
+            unredacted versions use the humanized insights and can be selected
+            manually.
           </SheetDescription>
         </SheetHeader>
         <fieldset
@@ -178,10 +180,15 @@ export function TrajectoryPanel({
                 value={version}
                 onChange={(event) => setVersion(event.target.value)}
               >
-                <option value="all">All versions</option>
-                <option value="original">Original</option>
-                <option value="redacted">Redacted</option>
+                <option value="all">All review versions</option>
+                <option value="unredacted">
+                  Unredacted insights and summary
+                </option>
+                <option value="redacted">Redacted insights and summary</option>
                 <option value="global">Global</option>
+                <option value="extraction draft">
+                  Earlier extraction drafts
+                </option>
               </select>
               <select
                 aria-label="Filter by review status"
@@ -323,7 +330,7 @@ export function TrajectoryPanel({
                             )
                             .map((review) => {
                               const totals = decisionCounts([review]);
-                              const label = reviewVersion(review);
+                              const label = reviewContentLabel(review);
                               return (
                                 <div
                                   key={review.id}
@@ -355,7 +362,8 @@ export function TrajectoryPanel({
                                           : 'Ready'}
                                     </span>
                                     {group.reviews.filter(
-                                      (item) => reviewVersion(item) === label,
+                                      (item) =>
+                                        reviewContentLabel(item) === label,
                                     ).length > 1 && (
                                       <span className="ml-2 text-xs">
                                         {review.id}

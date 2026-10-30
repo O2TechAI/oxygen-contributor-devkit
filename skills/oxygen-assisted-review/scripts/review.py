@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import copy
 import difflib
-import fcntl
 import hashlib
 import http.cookiejar
 import json
@@ -111,15 +110,17 @@ def locked(path, create=False):
     for child in root.rglob("*"):
         if child.is_symlink():
             raise ReviewError("Archive contains a symlink; refusing to read or change it.")
-    fd = os.open(root / ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    # Atomic directory creation also works when the shared filesystem's advisory
+    # lock service is unavailable. A crash leaves a claim for explicit recovery.
+    claim = root / ".operation-lock"
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ReviewError("Another helper is using this archive; retry after it finishes.") from None
+        claim.mkdir(mode=0o700)
+    except FileExistsError:
+        raise ReviewError("Another helper is using this archive; reconcile a stale .operation-lock before retrying.") from None
+    try:
         yield root
     finally:
-        os.close(fd)
+        claim.rmdir()
 
 
 class Client:
@@ -381,7 +382,7 @@ def start(args):
             if existing["reviewId"] != args.review or existing["server"] != args.server.rstrip("/"):
                 raise ReviewError("Archive already belongs to another review or server.")
             return {"archive": str(root), "reviewId": args.review, "existing": True}
-        if any(p.name != ".lock" for p in root.iterdir()):
+        if any(p.name not in {".lock", ".operation-lock"} for p in root.iterdir()):
             raise ReviewError("New archive directory is not empty.")
         client = Client(args.server)
         history = client.history(args.review)
@@ -539,16 +540,12 @@ def remove_archive(root):
         return
     with locked(root):
         for child in root.iterdir():
-            if child.name == ".lock":
+            if child.name == ".operation-lock":
                 continue
             if child.is_dir():
                 shutil.rmtree(child)
             else:
                 child.unlink()
-    # Release the open lock inode before unlinking it. Shared/NFS storage keeps
-    # an unlinked open file as .nfs*, which would otherwise prevent rmdir and
-    # leave an incomplete reset despite successful server replacement.
-    (root / ".lock").unlink()
     root.rmdir()
 
 

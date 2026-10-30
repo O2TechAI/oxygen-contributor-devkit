@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import json
 import re
+import shutil
 from pathlib import Path
 import stat
 import subprocess
@@ -51,6 +52,16 @@ class TrajectoryAgentsTests(unittest.TestCase):
         category_patch = patch.object(RUN, "CATEGORY_REFERENCE", self.categories)
         category_patch.start()
         self.addCleanup(category_patch.stop)
+        self.humanizer_root = self.root / "humanizer"
+        shutil.copytree(RUN.HUMANIZER_ROOT, self.humanizer_root)
+        self.humanizer_wrapper = self.root / "humanize.md"
+        shutil.copy2(RUN.HUMANIZER_WRAPPER, self.humanizer_wrapper)
+        humanizer_patch = patch.object(RUN, "HUMANIZER_ROOT", self.humanizer_root)
+        humanizer_patch.start()
+        self.addCleanup(humanizer_patch.stop)
+        wrapper_patch = patch.object(RUN, "HUMANIZER_WRAPPER", self.humanizer_wrapper)
+        wrapper_patch.start()
+        self.addCleanup(wrapper_patch.stop)
         self.source = self.root / "input.jsonl"
         self.original = b'{"type":"session_meta","payload":{"id":"synthetic"}}\n'
         self.source.write_bytes(self.original)
@@ -78,6 +89,12 @@ class TrajectoryAgentsTests(unittest.TestCase):
         RUN.issue_call(self.source, "insight")
         (self.run / "insight" / "insight.md").write_text(insights)
         return self.accept(self.source, "insight")
+
+    def finish_humanize(self, insights=None):
+        RUN.issue_call(self.source, "humanize")
+        data = (self.run / "insight/insight.md").read_text() if insights is None else insights
+        (self.run / "humanize/insight.md").write_text(data)
+        return self.accept(self.source, "humanize")
 
     def write_redaction(self, summary=SUMMARY, insights=INSIGHTS):
         directory = self.run / "redaction"
@@ -195,6 +212,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
 
     def test_paragraph_cards_complete_both_stages_without_companion_files(self):
         self.assertEqual(self.finish_insight(PARAGRAPH_INSIGHTS)["insights"], 1)
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         self.write_redaction(insights=PARAGRAPH_INSIGHTS)
         self.assertTrue(self.accept(self.source, "redaction")["run_complete"])
@@ -231,6 +249,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         result = self.accept(self.source, "insight")
         self.assertEqual(result["summary_lines"], 9)
         self.assertEqual((self.run / "summary/summary.md").read_text(), SUMMARY)
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         self.write_redaction(revised, (directory / "insight.md").read_text())
         self.assertTrue(self.accept(self.source, "redaction")["run_complete"])
@@ -290,6 +309,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         RUN.issue_call(self.source, "insight")
         (self.run / "insight/insight.md").write_text(INSIGHTS)
         self.assertFalse(self.accept(self.source, "insight")["run_complete"])
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         self.write_redaction()
         result = self.accept(self.source, "redaction")
@@ -392,6 +412,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.finish_summary()
         manifest = json.loads((self.run / "manifest.json").read_bytes())
         manifest["configuration"]["protocol_version"] = 7
+        manifest["configuration"].pop("stage_order")
         parser = (Path(__file__).parent / "fixtures/insight_cards_v7.py").read_bytes()
         (self.run / "protocol/insight_cards.py").write_bytes(parser)
         manifest["protocol_sha256"]["insight_cards.py"] = RUN.sha(parser)
@@ -411,6 +432,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.finish_summary()
         manifest = json.loads((self.run / "manifest.json").read_bytes())
         manifest["configuration"]["protocol_version"] = 8
+        manifest["configuration"].pop("stage_order")
         parser = (Path(__file__).parent / "fixtures/insight_cards_v8.py").read_bytes()
         (self.run / "protocol/insight_cards.py").write_bytes(parser)
         manifest["protocol_sha256"]["insight_cards.py"] = RUN.sha(parser)
@@ -493,6 +515,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
 
     def test_redaction_references_follow_new_lines(self):
         self.finish_insight()
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         shorter = SUMMARY.replace("\n## Purpose\n\n- User requested a check.\n", "")
         self.write_redaction(shorter, SHORT_INSIGHTS)
@@ -502,6 +525,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
 
     def test_redaction_labels_and_stale_citations_are_checked(self):
         self.finish_insight()
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         shorter = SUMMARY.replace("\n## Purpose\n\n- User requested a check.\n", "")
         self.write_redaction(shorter)
@@ -515,6 +539,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
     def test_empty_insights_and_fully_removed_redaction(self):
         result = self.finish_insight("")
         self.assertEqual(result["insights"], 0)
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         self.write_redaction("", "")
         result = self.accept(self.source, "redaction")
@@ -528,6 +553,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         (self.run / "insight/notes.txt").write_text("incidental")
         result = self.accept(self.source, "insight")
         self.assertEqual(set(result["sha256"]), {"summary.md", "summary_labeled.md", "insight.md"})
+        self.finish_humanize()
         RUN.issue_call(self.source, "redaction")
         self.write_redaction()
         (self.run / "redaction/notes.txt").write_text("incidental")
@@ -611,8 +637,8 @@ class TrajectoryAgentsTests(unittest.TestCase):
                 return {"status": "error"}
             if stage == "summary":
                 self.write_summary("" if stage == invalid_stage else SUMMARY)
-            elif stage == "insight":
-                (self.run / "insight/insight.md").write_text(INSIGHTS)
+            elif stage in {"insight", "humanize"}:
+                (self.run / stage / "insight.md").write_text(INSIGHTS)
             else:
                 self.write_redaction()
             return {"status": "complete"}
@@ -641,7 +667,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         dispatch, wait = self.host_adapters(events)
         result = asyncio.run(RUN.orchestrate(self.source, dispatch, wait, redact=False))
         self.assertFalse(result["run_complete"])
-        self.assertEqual(events, [("wait", "summary"), ("dispatch", "insight"), ("wait", "insight")])
+        self.assertEqual(events, [("wait", "summary"), ("dispatch", "insight"), ("wait", "insight"), ("dispatch", "humanize"), ("wait", "humanize")])
 
     def test_orchestrator_stops_on_invalid_output(self):
         events = []
@@ -689,7 +715,163 @@ class TrajectoryAgentsTests(unittest.TestCase):
                 dispatch, wait = self.host_adapters(events)
                 result = asyncio.run(RUN.orchestrate(source, dispatch, wait, redact=False))
                 self.assertFalse(result["run_complete"])
-                self.assertEqual(events, [("dispatch", "insight"), ("wait", "insight")])
+                self.assertEqual(events, [("dispatch", "insight"), ("wait", "insight"), ("dispatch", "humanize"), ("wait", "humanize")])
+
+    def test_humanizer_frozen_bundle_and_live_edits(self):
+        self.finish_insight()
+        frozen = (self.run / "protocol/humanize-template.md").read_bytes()
+        for name, data in RUN.HUMANIZER.bundle(self.humanizer_root, self.humanizer_wrapper).items():
+            self.assertEqual((self.run / "protocol" / name).read_bytes(), data)
+        self.assertIn((self.humanizer_root / "SKILL.md").read_bytes(), frozen)
+        self.assertIn(self.humanizer_wrapper.read_bytes(), frozen)
+        shutil.rmtree(self.humanizer_root)
+        self.humanizer_wrapper.unlink()
+        call = RUN.issue_call(self.source, "humanize")
+        self.assertTrue(call["message"].startswith(frozen.decode()))
+        (self.run / "humanize/insight.md").write_text(PARAGRAPH_INSIGHTS)
+        self.assertEqual(self.accept(self.source, "humanize")["insights"], 1)
+        redaction = RUN.issue_call(self.source, "redaction")["message"]
+        self.assertIn("RUN_DIR/humanize/insight.md", redaction)
+        self.assertEqual((self.run / "insight/insight.md").read_text(), INSIGHTS)
+
+    def test_orchestrator_records_humanizer_failure_without_retry_or_redaction(self):
+        events = []
+        dispatch, wait = self.host_adapters(events, failed_stage="humanize")
+        with self.assertRaisesRegex(ValueError, "worker_not_complete"):
+            asyncio.run(RUN.orchestrate(self.source, dispatch, wait))
+        self.assertEqual(events[-1], ("wait", "humanize"))
+        state = RUN.load_run(self.source, self.run)["stages"]
+        self.assertEqual(state["humanize"]["status"], "failed")
+        self.assertNotIn("redaction", state)
+        events.clear()
+        with self.assertRaisesRegex(ValueError, "stage_failed_use_new_run"):
+            asyncio.run(RUN.orchestrate(self.source, dispatch, wait))
+        self.assertEqual(events, [])
+
+    def test_humanizer_missing_and_invalid_references_fail_preparation(self):
+        upstream = self.humanizer_root / "SKILL.md"
+        for content in (None, b"", b"\xff"):
+            if content is None:
+                upstream.unlink(missing_ok=True)
+            else:
+                upstream.write_bytes(content)
+            with self.assertRaisesRegex(ValueError, "humanizer_reference_unavailable"):
+                RUN.prepare(self.source)
+            self.assertFalse(self.run.exists())
+
+    def test_local_humanizer_edits_apply_only_to_new_runs(self):
+        skill = self.humanizer_root / "SKILL.md"
+        first = skill.read_bytes()
+        self.finish_insight()
+        revised = first + b"\nLocal editorial guidance for future runs.\n"
+        skill.write_bytes(revised)
+        call = RUN.issue_call(self.source, "humanize")
+        self.assertIn(first.decode(), call["message"])
+        self.assertNotIn(revised.decode(), call["message"])
+        source = self.root / "next.jsonl"
+        source.write_bytes(self.original)
+        RUN.prepare(source)
+        _, new_run = RUN.paths(source)
+        self.assertEqual((new_run / "protocol/humanizer/SKILL.md").read_bytes(), revised)
+        self.assertFalse((new_run / "protocol/humanizer/source.json").exists())
+        RUN.verify_resume(self.source)
+
+    def test_humanizer_requires_extraction_and_blocks_redaction(self):
+        self.finish_summary()
+        with self.assertRaisesRegex(RUN.RunError, "insight_not_complete"):
+            RUN.issue_call(self.source, "humanize")
+        RUN.issue_call(self.source, "insight")
+        (self.run / "insight/insight.md").write_text(INSIGHTS)
+        self.accept(self.source, "insight")
+        with self.assertRaisesRegex(RUN.RunError, "humanize_not_complete"):
+            RUN.issue_call(self.source, "redaction")
+        RUN.issue_call(self.source, "humanize")
+        RUN.record_worker(self.source, "humanize", "failed-humanizer")
+        with self.assertRaisesRegex(RUN.RunError, "worker_not_complete"):
+            RUN.accept(self.source, "humanize", worker_id="failed-humanizer", worker_status="error")
+        self.assertEqual(RUN.load_run(self.source, self.run)["stages"]["humanize"]["status"], "failed")
+        with self.assertRaisesRegex(RUN.RunError, "dispatch_already_issued"):
+            RUN.issue_call(self.source, "humanize")
+
+    def test_humanizer_protects_types_evidence_and_card_count(self):
+        self.finish_insight()
+        RUN.issue_call(self.source, "humanize")
+        for text in (INSIGHTS.replace("Type: agent", "Type: user-agent"), SHORT_INSIGHTS,
+                     INSIGHTS.replace("L009, L013", "L009,L013"), "",
+                     INSIGHTS + INSIGHTS.replace("# I001", "# I002"),
+                     INSIGHTS.replace("# I001", "# I002")):
+            with self.subTest(text=text):
+                (self.run / "humanize/insight.md").write_text(text)
+                with self.assertRaises(ValueError):
+                    RUN.validate_outputs(self.run, "humanize")
+        (self.run / "humanize/insight.md").write_text(PARAGRAPH_INSIGHTS)
+        self.assertEqual(self.accept(self.source, "humanize")["insights"], 1)
+
+    def test_humanizer_protects_summary_and_accepted_input_hashes(self):
+        self.finish_insight()
+        RUN.issue_call(self.source, "humanize")
+        (self.run / "humanize/insight.md").write_text(INSIGHTS)
+        changed = SUMMARY.replace("reported success", "reported failure").encode()
+        (self.run / "humanize/summary.md").write_bytes(changed)
+        (self.run / "humanize/summary_labeled.md").write_bytes(RUN.LABEL.label_bytes(changed))
+        with self.assertRaisesRegex(ValueError, "humanizer_changed_summary"):
+            self.accept(self.source, "humanize")
+        self.assertEqual(RUN.load_run(self.source, self.run)["stages"]["humanize"]["error"], "invalid_humanizer_output")
+        (self.run / "insight/insight.md").write_text("")
+        with self.assertRaisesRegex(ValueError, "insight_outputs_changed"):
+            self.accept(self.source, "humanize")
+
+    def test_humanizer_modified_frozen_instructions_block_dispatch(self):
+        self.finish_insight()
+        (self.run / "protocol/humanizer/SKILL.md").write_text("changed")
+        with self.assertRaisesRegex(ValueError, "saved_protocol_changed"):
+            RUN.issue_call(self.source, "humanize")
+
+    def test_humanizer_modified_dispatch_blocks_recording_and_acceptance(self):
+        self.finish_insight()
+        RUN.issue_call(self.source, "humanize")
+        call_path = self.run / "humanize-call.json"
+        original = call_path.read_bytes()
+        call_path.write_text("{}")
+        with self.assertRaisesRegex(ValueError, "humanize_dispatch_changed"):
+            RUN.record_worker(self.source, "humanize", "worker")
+        call_path.write_bytes(original)
+        RUN.record_worker(self.source, "humanize", "worker")
+        (self.run / "humanize/insight.md").write_text(INSIGHTS)
+        call_path.write_text("{}")
+        with self.assertRaisesRegex(ValueError, "humanize_dispatch_changed"):
+            RUN.accept(self.source, "humanize", worker_id="worker", worker_status="complete")
+
+    def test_redaction_acceptance_rechecks_accepted_humanizer_outputs(self):
+        self.finish_insight()
+        self.finish_humanize()
+        RUN.issue_call(self.source, "redaction")
+        self.write_redaction()
+        (self.run / "humanize/insight.md").write_text("")
+        with self.assertRaisesRegex(ValueError, "humanize_outputs_changed"):
+            self.accept(self.source, "redaction")
+
+    def test_historical_v9_order_has_no_humanizer(self):
+        self.finish_insight()
+        manifest = RUN.load_run(self.source, self.run)
+        manifest["configuration"].pop("stage_order")
+        template = (self.run / "protocol/redaction-template.md").read_bytes().replace(
+            b"RUN_DIR/humanize/", b"RUN_DIR/insight/")
+        (self.run / "protocol/redaction-template.md").write_bytes(template)
+        manifest["protocol_sha256"]["redaction-template.md"] = RUN.sha(template)
+        RUN.save_manifest(self.run, manifest)
+        with self.assertRaisesRegex(ValueError, "stage_unavailable_in_saved_run"):
+            RUN.issue_call(self.source, "humanize")
+        call = RUN.issue_call(self.source, "redaction")
+        self.assertIn("RUN_DIR/insight/insight.md", call["message"])
+        self.write_redaction()
+        self.assertTrue(self.accept(self.source, "redaction")["run_complete"])
+
+    def test_humanizer_preserves_rich_markdown_code_and_literal_fields(self):
+        card = PARAGRAPH_INSIGHTS.replace("Evidence: L009, L013", "```text\nEvidence: literal\nrun --limit 3\n```\n\nEvidence: L009, L013")
+        self.finish_insight(card)
+        self.finish_humanize(card.replace("Verify reported results", "Verify a reported result"))
+        self.assertIn("run --limit 3", (self.run / "humanize/insight.md").read_text())
 
     def test_cli_requires_worker_receipt_then_accepts_plain_summary(self):
         def cli(*arguments):

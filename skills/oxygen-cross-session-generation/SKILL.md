@@ -47,8 +47,13 @@ storage policy. Retain only a compact report in the repository.
    `{"status":"complete"}` permits:
    `python3 scripts/cross_session.py accept RUN --worker-id WORKER_ID --worker-status complete`
    Record unsuccessful termination with `--worker-status failed` instead.
+6. Synthesis acceptance seals the original outputs and records `extracted`, not
+   final acceptance. Repeat steps 2–5 with `--stage humanize` on `call`,
+   `record-worker`, and `accept`. This dispatches a separate fresh worker using
+   the same model settings. Only successful Humanizer acceptance makes the new
+   run `accepted` and returns `finalOutputs` paths.
 
-`call` is issued once. If dispatch was issued but its ID was lost, reconcile the
+`call` is issued once per stage. If dispatch was issued but its ID was lost, reconcile the
 host log before recording it; do not spawn a replacement silently. Errors preserve
 the run for inspection. Report invalid input or failed worker output rather than
 repairing prose in the coordinator. A deliberate retry uses a new run directory.
@@ -101,8 +106,30 @@ truncated portions with smaller reads.
 Read receipts establish requested byte coverage, not semantic comprehension;
 the parent completion attestation depends on the host's actual final result.
 
-Readability review is part of the synthesis worker's drafting and final review.
-The worker reads each card without relying on source
+Readability review remains part of synthesis drafting. New runs then apply a
+fresh [Humanizer worker](references/humanize-worker.md) to the accepted cards and
+frozen summaries. Preparation reads the editable [local Humanizer skill](../humanizer/SKILL.md),
+its MIT license, and the overriding [Oxygen wrapper](../../prompts/humanize.md),
+then freezes and hashes those files. Local edits affect subsequent runs without
+requiring an upstream commit or source-hash match. Existing runs retain their saved
+copies. Missing guidance fails preparation. No network or global skill installation
+is needed. The worker may omit secondary detail while preserving defining choices,
+user requirements, attribution, scope, exceptions, and outcome status.
+
+Humanizer changes only Title, Description, Workflow, and Example. Summaries,
+candidate count/order/IDs, Type, and exact Evidence fields are unchanged. It does
+not resynthesize or create sidecars. A core support problem or failed validation
+stops the run without substituting the original draft. Structural checks alone
+cannot establish factual fidelity or comfortable reading.
+
+Original synthesis artifacts stay at the run root. Final humanized Markdown,
+`completion.json`, parsed JSON, and `validation.json` live under `humanize/`.
+Use the final acceptance result's paths. Both stages retain worker/completion
+records and output hashes; Humanizer reads do not change sealed extraction read
+receipts. `check --stage humanize` validates the final cards. Existing runs keep
+their frozen single-worker behavior.
+
+During synthesis drafting, the worker reads each card without relying on source
 context, removes secondary detail that crowds the explanation, and revises until
 the central method and its defining requirements are understandable. It then checks
 distinct applications, factual support, scope, attribution, and outcome status

@@ -66,6 +66,16 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         category_patch = mock.patch.object(CROSS, "CATEGORY_REFERENCE", self.category_reference)
         category_patch.start()
         self.addCleanup(category_patch.stop)
+        self.humanizer_root = self.root / "humanizer"
+        shutil.copytree(CROSS.HUMANIZER_ROOT, self.humanizer_root)
+        self.humanizer_wrapper = self.root / "humanize.md"
+        shutil.copy2(CROSS.HUMANIZER_WRAPPER, self.humanizer_wrapper)
+        humanizer_patch = mock.patch.object(CROSS, "HUMANIZER_ROOT", self.humanizer_root)
+        humanizer_patch.start()
+        self.addCleanup(humanizer_patch.stop)
+        wrapper_patch = mock.patch.object(CROSS, "HUMANIZER_WRAPPER", self.humanizer_wrapper)
+        wrapper_patch.start()
+        self.addCleanup(wrapper_patch.stop)
         self.reviews = []
         entries = []
         for suffix, episode in (("a", "The first episode had an unresolved verification step."),
@@ -111,6 +121,136 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.write_outputs(empty=empty)
         return self.accept()
 
+    def humanize(self, text=None):
+        CROSS.issue_call(self.run, "humanize")
+        CROSS.record_worker(self.run, "humanizer-test-worker", "humanize")
+        (self.run / "humanize/cross_session_insights.md").write_bytes(
+            (self.run / "cross_session_insights.md").read_bytes() if text is None else text.encode())
+        CROSS.write(self.run / "humanize/completion.json", {"status": "complete", "readingComplete": True})
+        return CROSS.accept(self.run, "humanizer-test-worker", "complete", "humanize")
+
+    def test_humanizer_finishes_run_and_preserves_extraction_receipts(self):
+        self.accepted_run()
+        sealed = CROSS.load(self.run / "state.json")["outputHashes"]
+        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "extracted")
+        self.read_all()
+        result = self.humanize(MARKDOWN.replace("Use when a reported outcome", "Use when an outcome"))
+        self.assertEqual(result["runStatus"], "accepted")
+        self.assertEqual(result["finalOutputs"]["markdown"], str(self.run / "humanize/cross_session_insights.md"))
+        self.assertEqual(result["finalOutputs"]["completion"], str(self.run / "humanize/completion.json"))
+        self.assertEqual(result["finalOutputs"]["validation"], str(self.run / "humanize/validation.json"))
+        for name, expected in sealed.items():
+            self.assertEqual(CROSS.digest((self.run / name).read_bytes()), expected)
+        CROSS.verify(self.run)
+
+    def test_humanizer_exact_bundle_is_frozen_without_live_dependency(self):
+        self.accepted_run()
+        for name, data in CROSS.HUMANIZER.bundle(self.humanizer_root, self.humanizer_wrapper).items():
+            self.assertEqual((self.run / "protocol/references" / name).read_bytes(), data)
+        shutil.rmtree(self.humanizer_root)
+        self.humanizer_wrapper.unlink()
+        self.humanize()
+        CROSS.verify(self.run)
+
+    def test_humanizer_unavailable_reference_prevents_preparation(self):
+        (self.humanizer_root / "LICENSE").unlink()
+        with self.assertRaisesRegex(ValueError, "humanizer_reference_unavailable"):
+            self.prepare()
+        self.assertFalse(self.run.exists())
+
+    def test_local_humanizer_edits_apply_only_to_new_runs(self):
+        skill = self.humanizer_root / "SKILL.md"
+        first = skill.read_bytes()
+        self.accepted_run()
+        revised = first + b"\nLocal editorial guidance for future runs.\n"
+        skill.write_bytes(revised)
+        self.humanize()
+        self.assertEqual((self.run / "protocol/references/humanizer/SKILL.md").read_bytes(), first)
+        new_run = self.root / "next-run"
+        CROSS.prepare(self.inputs, new_run)
+        self.assertEqual((new_run / "protocol/references/humanizer/SKILL.md").read_bytes(), revised)
+        self.assertFalse((new_run / "protocol/references/humanizer/source.json").exists())
+        CROSS.verify(self.run)
+
+    def test_humanizer_tampered_instructions_and_summary_are_detected(self):
+        self.accepted_run()
+        for name in ("protocol/humanizer-instructions.md", "reading/S001/summary.md"):
+            path = self.run / name
+            original = path.read_bytes()
+            path.write_text("changed")
+            with self.assertRaisesRegex(ValueError, "frozen_file_changed"):
+                CROSS.issue_call(self.run, "humanize")
+            path.write_bytes(original)
+
+    def test_humanizer_protects_fields_and_stops_failed_run(self):
+        self.accepted_run()
+        CROSS.issue_call(self.run, "humanize")
+        CROSS.record_worker(self.run, "humanizer-test-worker", "humanize")
+        CROSS.write(self.run / "humanize/completion.json", {"status": "complete", "readingComplete": True})
+        for text in ("", MARKDOWN.replace("Type: agent", "Type: user-agent"),
+                     MARKDOWN.replace("S001:L002, S002:L002", "S002:L002, S001:L002"),
+                     MARKDOWN.replace("S001:L002, S002:L002", "S001:L002,S002:L002"),
+                     MARKDOWN + MARKDOWN.replace("# C001", "# C002")):
+            (self.run / "humanize/cross_session_insights.md").write_text(text)
+            with self.assertRaisesRegex(ValueError, "humanizer_changed"):
+                CROSS.check(self.run, "humanize")
+        with self.assertRaisesRegex(ValueError, "humanizer_changed"):
+            CROSS.accept(self.run, "humanizer-test-worker", "complete", "humanize")
+        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "failed")
+        self.assertNotIn("finalOutputs", CROSS.load(self.run / "state.json"))
+        self.assertEqual((self.run / "cross_session_insights.md").read_text(), MARKDOWN)
+
+    def test_humanizer_requires_synthesis_and_no_duplicate_dispatch(self):
+        self.start_worker()
+        with self.assertRaisesRegex(ValueError, "humanize_dispatch_unavailable"):
+            CROSS.issue_call(self.run, "humanize")
+        self.read_all()
+        self.write_outputs()
+        self.accept()
+        CROSS.issue_call(self.run, "humanize")
+        with self.assertRaisesRegex(ValueError, "humanize_dispatch_unavailable"):
+            CROSS.issue_call(self.run, "humanize")
+        CROSS.record_worker(self.run, "failed-worker", "humanize")
+        with self.assertRaisesRegex(ValueError, "worker_failed"):
+            CROSS.accept(self.run, "failed-worker", "failed", "humanize")
+        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "failed")
+
+    def test_humanizer_accepts_empty_and_keeps_summary_only_index(self):
+        self.accepted_run(empty=True)
+        self.assertEqual(self.humanize()["candidateCount"], 0)
+        index = CROSS.load(self.run / "humanize-summary-index.json")
+        self.assertEqual(len(index["files"]), 2)
+        self.assertTrue(all(item["path"].endswith("/summary.md") for item in index["files"]))
+
+    def test_humanizer_frozen_cli_dispatch_record_check_accept(self):
+        self.accepted_run()
+        for command, extra in (("call", []), ("record-worker", ["--worker-id", "cli-humanizer"])):
+            proc = subprocess.run([sys.executable, str(SCRIPT), command, str(self.run), "--stage", "humanize", *extra],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        (self.run / "humanize/cross_session_insights.md").write_text(MARKDOWN)
+        CROSS.write(self.run / "humanize/completion.json", {"status": "complete", "readingComplete": True})
+        for command, extra in (("check", []), ("accept", ["--worker-id", "cli-humanizer", "--worker-status", "complete"])):
+            proc = subprocess.run([sys.executable, str(SCRIPT), command, str(self.run), "--stage", "humanize", *extra],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "accepted")
+
+    def test_legacy_config_completes_without_humanizer(self):
+        self.start_worker()
+        config = CROSS.load(self.run / "config.json")
+        config.pop("stageOrder")
+        CROSS.write(self.run / "config.json", config, replace=True)
+        manifest = CROSS.load(self.run / "manifest.json")
+        manifest["config"] = config
+        manifest["frozenHashes"]["config.json"] = CROSS.digest((self.run / "config.json").read_bytes())
+        CROSS.write(self.run / "manifest.json", manifest, replace=True)
+        self.read_all()
+        self.write_outputs()
+        self.assertEqual(self.accept()["runStatus"], "accepted")
+        with self.assertRaisesRegex(ValueError, "humanize_dispatch_unavailable"):
+            CROSS.issue_call(self.run, "humanize")
+
     def test_prepare_freezes_actual_export_bytes_and_preserves_sources(self):
         (self.inputs / "export-note.txt").write_bytes(b"ancillary export bytes\x00")
         before = snapshot(self.inputs)
@@ -141,6 +281,7 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.assertEqual(settings, {
             "model": "gpt-6.1-sol", "reasoning_effort": "high", "fork_turns": "none",
             "format": "oxygen-cross-session-candidates/v2", "privacyStatus": "private-awaiting-review",
+            "stageOrder": ["synthesis", "humanize"],
         })
         dispatch = CROSS.load(self.run / "dispatch.json")
         self.assertEqual({key: dispatch[key] for key in ("model", "reasoning_effort", "fork_turns")},
@@ -495,7 +636,7 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.assertEqual(result["sources"], CROSS.load(self.run / "corpus.json")["sources"])
         self.assertEqual(validation["candidateCount"], 1)
         self.assertEqual(len(validation["coverage"]), 4)
-        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "accepted")
+        self.assertEqual(CROSS.load(self.run / "state.json")["status"], "extracted")
         self.assertEqual(snapshot(self.inputs), before)
         self.assertEqual(CROSS.verify(self.run, check_originals=True)["status"], "verified")
         with self.assertRaisesRegex(ValueError, "worker_state_mismatch"):
@@ -543,8 +684,8 @@ class CrossSessionLifecycleTests(unittest.TestCase):
             'OUTPUTS = ("cross_session_insights.md",',
             'OUTPUTS = ("candidate_provenance.json", "cross_session_insights.md",',
         ).replace(
-            'def check(run):\n    verify(run)',
-            'def check(run):\n    verify(run)\n    load(run / "candidate_provenance.json")',
+            'def check(run, stage="synthesis"):\n    verify(run)',
+            'def check(run, stage="synthesis"):\n    verify(run)\n    load(run / "candidate_provenance.json")',
         )
         helper.write_text(legacy)
         with mock.patch.object(CROSS, "FORMAT", "oxygen-cross-session-candidates/v1"):
@@ -589,8 +730,8 @@ class CrossSessionLifecycleTests(unittest.TestCase):
             'OUTPUTS = ("cross_session_insights.md",',
             'OUTPUTS = ("synthesis_report.md", "cross_session_insights.md",',
         ).replace(
-            'def check(run):\n    verify(run)',
-            'def check(run):\n    verify(run)\n'
+            'def check(run, stage="synthesis"):\n    verify(run)',
+            'def check(run, stage="synthesis"):\n    verify(run)\n'
             '    if not regular(run / "synthesis_report.md").decode("utf-8").strip():\n'
             '        raise ValueError("empty_synthesis_report")',
         )

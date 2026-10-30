@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Freeze completed reviews, record one worker, and validate cross-session drafts."""
+"""Freeze completed reviews, record fresh workers, and validate cross-session drafts."""
 
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,16 @@ EFFORT = "high"
 FORMAT = "oxygen-cross-session-candidates/v2"
 SKILL = Path(__file__).resolve().parents[1]
 CATEGORY_REFERENCE = SKILL.parents[1] / "prompts" / "insight_categories.md"
+HUMANIZER_ROOT = SKILL.parents[1] / "skills/humanizer"
+HUMANIZER_WRAPPER = SKILL.parents[1] / "prompts/humanize.md"
+HUMANIZER_SCRIPT = Path(__file__).with_name("humanizer_protocol.py")
+if not HUMANIZER_SCRIPT.is_file():
+    HUMANIZER_SCRIPT = SKILL.parents[1] / "tools/humanizer_protocol.py"
+HUMANIZER = None
+if HUMANIZER_SCRIPT.is_file():
+    HUMANIZER_SPEC = importlib.util.spec_from_file_location("oxygen_cross_humanizer", HUMANIZER_SCRIPT)
+    HUMANIZER = importlib.util.module_from_spec(HUMANIZER_SPEC)
+    HUMANIZER_SPEC.loader.exec_module(HUMANIZER)
 OUTPUTS = ("cross_session_insights.md", "completion.json")
 
 
@@ -106,6 +117,9 @@ def prepare(input_dir, run):
         categories.decode("utf-8")
     except (OSError, ValueError) as exc:
         raise ValueError("category_reference_unavailable") from exc
+    if HUMANIZER is None:
+        raise ValueError("humanizer_reference_unavailable")
+    humanizer = HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER)
     corpus = normalize_export(input_dir)
     if len(corpus["sources"]) < 2:
         raise ValueError("insufficient_distinct_trajectories: supply at least two completed trajectories")
@@ -129,8 +143,13 @@ def prepare(input_dir, run):
                     write(run / "protocol" / folder / src.name, regular(src))
         write(run / "protocol" / "SKILL.md", regular(SKILL / "SKILL.md"))
         write(run / "protocol/references/insight_categories.md", categories)
+        write(run / "protocol/scripts/humanizer_protocol.py", regular(HUMANIZER_SCRIPT))
+        for name, data in humanizer.items():
+            write(run / "protocol/references" / name, data)
+        write(run / "protocol/humanizer-instructions.md", HUMANIZER.instructions(humanizer))
         settings = {"model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none",
-                    "format": FORMAT, "privacyStatus": "private-awaiting-review"}
+                    "format": FORMAT, "privacyStatus": "private-awaiting-review",
+                    "stageOrder": ["synthesis", "humanize"]}
         write(run / "config.json", settings)
         reading = []
         for source in corpus["sources"]:
@@ -168,6 +187,27 @@ def prepare(input_dir, run):
                            + ". This file is your delegated task. Use only its supplied evidence corpus; "
                              "write outputs only in its run directory. Return its required final status."}
         write(run / "dispatch.json", call)
+        summary_index = {"files": [item for entry in reading for item in entry["files"]
+                                   if item["path"].endswith("/summary.md")]}
+        write(run / "humanize-summary-index.json", summary_index)
+        humanize_context = {
+            "humanizerInstructions": str(run / "protocol/humanizer-instructions.md"),
+            "formatInstructions": str(run / "protocol/references/candidate-format.md"),
+            "summaryIndex": str(run / "humanize-summary-index.json"),
+            "runDirectory": str(run),
+            "inputCards": str(run / "cross_session_insights.md"),
+            "outputCards": str(run / "humanize/cross_session_insights.md"),
+            "completionFile": str(run / "humanize/completion.json"),
+            "checkCommand": [sys.executable, str(helper), "check", str(run), "--stage", "humanize"],
+        }
+        humanize_prompt = regular(run / "protocol/references/humanize-worker.md")
+        humanize_prompt += b"\n\n## This run\n\n" + json_bytes(humanize_context)
+        write(run / "protocol/humanize-worker-prompt.md", humanize_prompt)
+        humanize_call = dict(call, task_name=call["task_name"] + "_humanize",
+                            message="Read and follow the complete frozen worker instructions at "
+                            + str(run / "protocol/humanize-worker-prompt.md")
+                            + ". This file is your delegated task. Return its required final status.")
+        write(run / "humanize-dispatch.json", humanize_call)
         write(run / "input_validation.json", {"status": "valid", "counts": corpus["counts"],
                                               "duplicates": corpus["duplicates"],
                                               "actualExportFileCount": len(corpus["files"])})
@@ -202,10 +242,17 @@ def verify(run, check_originals=False):
             "originalsChecked": check_originals}
 
 
-def issue_call(run):
+def issue_call(run, stage="synthesis"):
     with lock(run):
         verify(run)
         state = load(run / "state.json")
+        if stage == "humanize":
+            if state["status"] != "extracted" or "humanize" in state:
+                raise ValueError("humanize_dispatch_unavailable")
+            (run / "humanize").mkdir(mode=0o700)
+            state["humanize"] = {"status": "dispatched", "workerId": None, "dispatchedAt": now()}
+            write(run / "state.json", state, replace=True)
+            return load(run / "humanize-dispatch.json")
         if state["status"] != "prepared":
             raise ValueError("dispatch_already_issued: reconcile the recorded host call")
         state.update(status="dispatched", dispatchedAt=now(), updatedAt=now())
@@ -213,18 +260,21 @@ def issue_call(run):
         return load(run / "dispatch.json")
 
 
-def record_worker(run, worker_id):
+def record_worker(run, worker_id, stage="synthesis"):
     with lock(run):
         verify(run)
         state = load(run / "state.json")
-        if state["status"] != "dispatched" or state["workerId"] is not None:
+        current = state if stage == "synthesis" else state.get("humanize", {})
+        if current.get("status") != "dispatched" or current.get("workerId") is not None:
             raise ValueError("worker_not_recordable")
         if not worker_id.strip():
             raise ValueError("empty_worker_id")
-        state.update(status="running", workerId=worker_id, updatedAt=now())
+        current.update(status="running", workerId=worker_id, updatedAt=now())
         write(run / "state.json", state, replace=True)
-        write(run / "worker_record.json", {"workerId": worker_id, "recordedAt": now(),
-                                          "dispatchSha256": digest(regular(run / "dispatch.json"))})
+        prefix = "humanize/" if stage == "humanize" else ""
+        dispatch = "humanize-dispatch.json" if stage == "humanize" else "dispatch.json"
+        write(run / (prefix + "worker_record.json"), {"workerId": worker_id, "recordedAt": now(),
+                                          "dispatchSha256": digest(regular(run / dispatch))})
         return state
 
 
@@ -253,7 +303,8 @@ def read_chunk(run, name, start, limit):
         receipt = {"path": name, "start": start, "end": end,
                    "totalBytes": len(data), "sha256": digest(data), "at": now()}
         # Inspection after acceptance must not invalidate the sealed receipts.
-        if load(run / "state.json")["status"] != "accepted":
+        state = load(run / "state.json")
+        if state["status"] != "accepted" and "read_receipts.json" not in state.get("outputHashes", {}):
             path = run / "read_receipts.json"
             receipts = load(path) if path.exists() else []
             receipts.append(receipt)
@@ -288,13 +339,26 @@ def reading_coverage(run):
     return coverage
 
 
-def check(run):
+def check(run, stage="synthesis"):
     verify(run)
     corpus = load(run / "corpus.json")
-    cards = parse_cards(regular(run / "cross_session_insights.md"), corpus["sources"])
-    completion = load(run / "completion.json")
+    directory = run / "humanize" if stage == "humanize" else run
+    data = regular(directory / "cross_session_insights.md")
+    cards = parse_cards(data, corpus["sources"])
+    completion = load(directory / "completion.json")
     if completion.get("status") != "complete" or completion.get("readingComplete") is not True:
         raise ValueError("worker_reading_incomplete")
+    if stage == "humanize":
+        state = load(run / "state.json")
+        if "cross_session_insights.md" not in state.get("outputHashes", {}):
+            raise ValueError("synthesis_not_accepted")
+        original = regular(run / "cross_session_insights.md")
+        HUMANIZER.validate_preservation(parse_cards(original, corpus["sources"]), cards, original, data)
+        return cards, {"status": "valid", "format": FORMAT, "candidateCount": len(cards),
+                       "checks": ["frozen_hashes", "six_fields", "qualified_citations",
+                                  "unchanged_card_identity_type_order_evidence", "unchanged_summaries"],
+                       "limitations": ["Structural checks do not establish factual fidelity or readability.",
+                                       "Humanizer completion attests full input reading and semantic comparison."]}
     coverage = reading_coverage(run)
     return cards, {"status": "valid", "format": FORMAT, "candidateCount": len(cards),
                       "sourceCounts": corpus["counts"], "coverage": coverage,
@@ -306,38 +370,54 @@ def check(run):
                                       "Per-candidate source-card lineage and declined-reuse explanations are not structurally validated."]}
 
 
-def accept(run, worker_id, worker_status):
+def accept(run, worker_id, worker_status, stage="synthesis"):
     with lock(run):
         state = load(run / "state.json")
-        if state["status"] != "running" or state["workerId"] != worker_id:
+        current = state if stage == "synthesis" else state.get("humanize", {})
+        if current.get("status") != "running" or current.get("workerId") != worker_id:
             raise ValueError("worker_state_mismatch")
+        directory = run / "humanize" if stage == "humanize" else run
         attestation = {"workerId": worker_id, "status": worker_status, "recordedAt": now(),
                        "basis": "Parent inspected actual host termination and final task result."}
-        write(run / "completion_attestation.json", attestation)
+        write(directory / "completion_attestation.json", attestation)
         try:
             if worker_status != "complete":
                 raise ValueError("worker_failed")
-            cards, validation = check(run)
+            cards, validation = check(run, stage)
             corpus = load(run / "corpus.json")
             result = {"format": FORMAT, "status": "draft", "privacyStatus": "private-awaiting-review",
                       "candidates": [dict(card, status="draft") for card in cards],
                       "sources": corpus["sources"], "inputHashes": corpus["files"],
                       "config": load(run / "config.json"), "workerId": worker_id}
-            write(run / "cross_session_insights.json", result)
-            write(run / "validation.json", validation)
+            write(directory / "cross_session_insights.json", result)
+            write(directory / "validation.json", validation)
             names = (*OUTPUTS, "cross_session_insights.json", "validation.json",
-                     "read_receipts.json", "worker_record.json", "completion_attestation.json")
+                     "worker_record.json", "completion_attestation.json")
+            if stage == "synthesis":
+                names += ("read_receipts.json",)
             for name in names:
-                os.chmod(run / name, 0o600)
-            state.update(status="accepted", updatedAt=now(),
-                         outputHashes={name: digest(regular(run / name)) for name in names})
+                os.chmod(directory / name, 0o600)
+            hashes = dict(state.get("outputHashes", {}))
+            hashes.update({str((directory / name).relative_to(run)): digest(regular(directory / name))
+                           for name in names})
+            required = "humanize" in load(run / "config.json").get("stageOrder", [])
+            current["status"] = "accepted"
+            state.update(status="extracted" if stage == "synthesis" and required else "accepted",
+                         updatedAt=now(), outputHashes=hashes)
+            if state["status"] == "accepted":
+                state["finalOutputs"] = {"markdown": str(directory / "cross_session_insights.md"),
+                                         "json": str(directory / "cross_session_insights.json"),
+                                         "completion": str(directory / "completion.json"),
+                                         "validation": str(directory / "validation.json")}
             write(run / "state.json", state, replace=True)
-            return validation
+            return {**validation, "runStatus": state["status"],
+                    **({"finalOutputs": state["finalOutputs"]} if "finalOutputs" in state else {})}
         except Exception as exc:
+            current.update(status="failed", error=str(exc), updatedAt=now())
             state.update(status="failed", error=str(exc), updatedAt=now())
             write(run / "state.json", state, replace=True)
-            if not (run / "validation.json").exists():
-                write(run / "validation.json", {"status": "failed", "error": str(exc)})
+            if not (directory / "validation.json").exists():
+                write(directory / "validation.json", {"status": "failed", "error": str(exc)})
             raise
 
 
@@ -350,6 +430,8 @@ def main(argv=None):
     for name in ("call", "record-worker", "read", "check", "accept", "verify"):
         cmd = commands.add_parser(name)
         cmd.add_argument("run", type=Path)
+        if name in ("call", "record-worker", "check", "accept"):
+            cmd.add_argument("--stage", choices=("synthesis", "humanize"), default="synthesis")
         if name in ("record-worker", "accept"):
             cmd.add_argument("--worker-id", required=True)
         if name == "accept":
@@ -378,9 +460,9 @@ def main(argv=None):
         if args.command == "prepare":
             result = prepare(args.input, run)
         elif args.command == "call":
-            result = issue_call(run)
+            result = issue_call(run, args.stage)
         elif args.command == "record-worker":
-            result = record_worker(run, args.worker_id)
+            result = record_worker(run, args.worker_id, args.stage)
         elif args.command == "read":
             if args.limit is None:
                 raise ValueError("read_limit_required: choose --limit after measuring the file and planning tool output")
@@ -390,9 +472,9 @@ def main(argv=None):
             print(f"\n[End of displayed chunk. Next byte offset: {receipt['end']}]")
             return 0
         elif args.command == "check":
-            _, result = check(run)
+            _, result = check(run, args.stage)
         elif args.command == "accept":
-            result = accept(run, args.worker_id, args.worker_status)
+            result = accept(run, args.worker_id, args.worker_status, args.stage)
         else:
             result = verify(run, args.check_originals)
         print(json.dumps(result, ensure_ascii=False, indent=2))

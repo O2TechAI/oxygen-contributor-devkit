@@ -1,4 +1,5 @@
 import type { Review } from './review-types.ts';
+import { reviewContentLabel } from './trajectory-list.ts';
 
 export function reviewLabels(reviews: Review[]): Map<string, string> {
   const entries = reviews.map((review) => {
@@ -24,7 +25,7 @@ export function reviewLabels(reviews: Review[]): Map<string, string> {
       .split(' · ')
       .filter(
         (part) =>
-          !/^(trajectory[-_ ]?\d+|original|redacted|review)$/i.test(
+          !/^(trajectory[-_ ]?\d+|original|humanized|unredacted|redacted|(?:unredacted|redacted) insights and summary|extraction draft|review)$/i.test(
             part.trim(),
           ),
       )
@@ -33,12 +34,7 @@ export function reviewLabels(reviews: Review[]): Map<string, string> {
     const date = version
       ? `${version[1]} ${version[2].slice(0, 2)}:${version[2].slice(2, 4)}:${version[2].slice(4, 6)}`
       : undefined;
-    const stage =
-      review.privacyStatus === 'redacted'
-        ? 'Redacted'
-        : review.privacyStatus === 'unredacted'
-          ? 'Original'
-          : 'Review';
+    const stage = reviewContentLabel(review);
     const label = [
       trajectory ? `Trajectory ${trajectory}` : undefined,
       title || project,

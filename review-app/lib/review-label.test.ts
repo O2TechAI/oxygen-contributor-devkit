@@ -37,6 +37,13 @@ void test('distinguishes same-project trajectories, stages, reruns, and duplicat
       id: 'e',
       sourcePath: 'run-20260101T120000Z-trajectory-009-redacted',
     },
+    {
+      ...base,
+      id: 'humanized',
+      sourcePath: 'run-20260101T120000Z-trajectory-009-humanized',
+      stage: 'humanize' as const,
+      privacyStatus: 'unredacted' as const,
+    },
   ];
   const labels = reviewLabels(reviews);
   assert.equal(new Set(labels.values()).size, reviews.length);
@@ -45,7 +52,8 @@ void test('distinguishes same-project trajectories, stages, reruns, and duplicat
     /^Trajectory 009 · Simulator audit · Redacted/,
   );
   assert.match(labels.get('b')!, /^Trajectory 021/);
-  assert.match(labels.get('c')!, /Original/);
+  assert.match(labels.get('c')!, /Extraction draft/);
+  assert.match(labels.get('humanized')!, /Unredacted insights and summary/);
   assert.match(labels.get('d')!, /20260102/);
   assert.equal(reviews[0].projectName, 'example-project');
 });
