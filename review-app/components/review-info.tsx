@@ -11,18 +11,25 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 
-export function ReviewInfo({ review }: { review: Review }) {
+export function ReviewInfo({
+  review,
+  showLabel = false,
+}: {
+  review: Review;
+  showLabel?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
+        size={showLabel ? 'default' : 'icon-sm'}
         aria-label="Page information"
         title="Page information"
         onClick={() => setOpen(true)}
       >
         <Info />
+        {showLabel && 'Page information'}
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent className="overflow-y-auto">
@@ -60,11 +67,13 @@ export function ReviewInfo({ review }: { review: Review }) {
             <div>
               <dt>Verification</dt>
               <dd>
-                {review.provenance.draftHashVerified
-                  ? 'Humanized draft verified; original extraction provenance unavailable'
-                  : review.provenance.hashVerified
-                    ? 'Manifest hashes verified'
-                    : 'Original provenance unavailable'}
+                {review.reviewLevel === 'global'
+                  ? 'Imported global candidates; source authenticity and privacy not certified'
+                  : review.provenance.draftHashVerified
+                    ? 'Humanized draft verified; original extraction provenance unavailable'
+                    : review.provenance.hashVerified
+                      ? 'Manifest hashes verified'
+                      : 'Original provenance unavailable'}
               </dd>
             </div>
             {review.provenance.sourceKind === 'saved-review-humanization' && (

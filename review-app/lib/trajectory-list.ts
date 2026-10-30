@@ -7,9 +7,11 @@ export function trajectoryIdentity(sourcePath: string, fallbackId: string) {
     : { key: fallbackId, run: 'Other reviews', number: '' };
 }
 
-type ReviewStage = Pick<Review, 'privacyStatus'> & Partial<Pick<Review, 'stage'>>;
+type ReviewStage = Pick<Review, 'privacyStatus'> &
+  Partial<Pick<Review, 'stage' | 'reviewLevel'>>;
 
 export function isExtractionDraft(review: ReviewStage) {
+  if (review.reviewLevel === 'global') return false;
   return (
     review.stage === 'insight' ||
     (review.privacyStatus === 'unredacted' && review.stage !== 'humanize')
@@ -17,6 +19,7 @@ export function isExtractionDraft(review: ReviewStage) {
 }
 
 export function reviewVersion(review: ReviewStage) {
+  if (review.reviewLevel === 'global') return 'Global';
   if (isExtractionDraft(review)) return 'Extraction draft';
   if (review.privacyStatus === 'redacted') return 'Redacted';
   if (review.stage === 'humanize') return 'Unredacted';
@@ -109,7 +112,8 @@ export function filterTrajectories(
     if (!filters.selectedOnly && group.run !== filters.run) return [];
     const reviews = group.reviews.filter(
       (review) =>
-        (review.privacyStatus === 'redacted' ||
+        (review.reviewLevel === 'global' ||
+          review.privacyStatus === 'redacted' ||
           review.privacyStatus === 'unredacted') &&
         (filters.version === 'all'
           ? !isExtractionDraft(review) ||

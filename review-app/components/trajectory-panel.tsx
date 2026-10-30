@@ -180,10 +180,15 @@ export function TrajectoryPanel({
                 value={version}
                 onChange={(event) => setVersion(event.target.value)}
               >
-                <option value="all">Unredacted and redacted</option>
-                <option value="unredacted">Unredacted insights and summary</option>
+                <option value="all">All review versions</option>
+                <option value="unredacted">
+                  Unredacted insights and summary
+                </option>
                 <option value="redacted">Redacted insights and summary</option>
-                <option value="extraction draft">Earlier extraction drafts</option>
+                <option value="global">Global</option>
+                <option value="extraction draft">
+                  Earlier extraction drafts
+                </option>
               </select>
               <select
                 aria-label="Filter by review status"
@@ -357,7 +362,8 @@ export function TrajectoryPanel({
                                           : 'Ready'}
                                     </span>
                                     {group.reviews.filter(
-                                      (item) => reviewContentLabel(item) === label,
+                                      (item) =>
+                                        reviewContentLabel(item) === label,
                                     ).length > 1 && (
                                       <span className="ml-2 text-xs">
                                         {review.id}

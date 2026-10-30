@@ -11,6 +11,8 @@ and ways to participate. Review help links there in a new tab, opens on first
 use and can be reopened with **Review help**. Dismissing it is remembered in
 this browser. The header shows `3/3 reviewed` beside **Complete**; accepted and
 declined cards both count. This is review progress, not an evaluation score.
+The **More review actions (⋯)** menu contains import, export, the trajectory list,
+help, page information, and sign out. **Changes** and **Complete** remain visible.
 **Page information** contains the source, protocol, stage, verification, and model
 details. The privacy label remains visible in the header. Card prose is shown
 without a nested gray box. These prompts do not collect questionnaire responses.
@@ -238,8 +240,8 @@ versions use the humanized output, start unchecked, and can be selected manually
 current run**, or individual checkboxes; **View selected** shows the full selection.
 Selections remain checked while you open and edit individual reviews. Apply editor changes before opening another review or exporting; pending saves
 are flushed automatically.
-The default version filter shows **Unredacted and redacted**. Each can also be
-shown separately. **Earlier extraction drafts** explicitly opens older, raw
+The default **All review versions** filter shows humanized unredacted, redacted,
+and global reviews. Each can also be shown separately. **Earlier extraction drafts** explicitly opens older, raw
 extraction imports; these are never relabeled as humanized output. The run filter lists individual
 runs. **View selected** shows checked versions across runs and temporarily
 disables the run filter; returning to the full list restores that filter.
@@ -322,3 +324,22 @@ Generalized Workflow recommendations need not all have been demonstrated in the
 historical case. Evidence supports factual claims and the method's origin.
 Rich Markdown is preserved through review and export. Existing reviews,
 annotations, frozen prompts, and validators are not converted.
+
+## Review global insights
+
+After individual reviews are finished, run `oxygen-cross-session-generation` on
+those exports. In **Import review**, select its `cross_session_insights.json`
+(v2) to open a separate **Global review**. The page shows all supplied source
+summaries, clickable qualified evidence such as `S002:L003`, and new pending
+cards. Edit, accept or decline, inspect **Saved changes**, and complete this
+second review. Reloading restores the saved global review and revisions.
+
+The importer checks card structure, citation targets, and support from at least
+two distinct trajectory identities. It does not authenticate the supplied JSON
+or certify its privacy. Global completion records editorial review, not privacy
+approval. The import never edits individual reviews. Local line IDs are used
+for editing and Markdown export; `sourceId` preserves qualified source citations
+and original candidate IDs in the JSON snapshot, alongside the source catalog.
+Global snapshots are second-stage outputs, not new individual extraction inputs.
+The generation command remains a separate agent workflow; importing does not
+start model calls or regenerate candidates in the browser.

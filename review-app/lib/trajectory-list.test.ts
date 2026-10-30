@@ -54,44 +54,98 @@ const filters = {
   selectedOnly: false,
 };
 
+void test('global reviews remain visible alongside humanized reviews without exposing raw extraction', () => {
+  const global = {
+    ...review('global', '001', 'unknown'),
+    reviewLevel: 'global' as const,
+    stage: 'insight' as const,
+  };
+  const reviews = [
+    review('original', '001', 'unredacted'),
+    { ...review('humanized', '001', 'unredacted'), stage: 'humanize' as const },
+    review('redacted', '001', 'redacted'),
+    global,
+  ];
+  const groups = groupTrajectories(reviews);
+  const ids = (version: string) =>
+    filterTrajectories(groups, { ...filters, version }, []).flatMap((group) =>
+      group.reviews.map((item) => item.id),
+    );
+  assert.deepEqual(
+    visibleReviews(reviews).map((item) => item.id),
+    ['humanized', 'redacted', 'global'],
+  );
+  assert.deepEqual(ids('all'), ['humanized', 'redacted', 'global']);
+  assert.deepEqual(ids('global'), ['global']);
+  assert.deepEqual(ids('unredacted'), ['humanized']);
+  assert.deepEqual(defaultReviewSelection(reviews, 'run-first'), ['redacted']);
+  assert.equal(reviewContentLabel(global), 'Global');
+});
+
 void test('unredacted means humanized; raw extraction is available only by explicit selection', () => {
-  const humanized = { ...review('humanized', '001', 'unredacted'), stage: 'humanize' as const };
+  const humanized = {
+    ...review('humanized', '001', 'unredacted'),
+    stage: 'humanize' as const,
+  };
   const original = review('original', '001', 'unredacted');
   const reviews = [original, humanized, review('redacted', '001', 'redacted')];
   const groups = groupTrajectories(reviews);
   assert.equal(groups.length, 1);
   assert.deepEqual(defaultReviewSelection(reviews, 'run-first'), ['redacted']);
   assert.deepEqual(
-    filterTrajectories(groups, { ...filters, version: 'unredacted' }, [])
-      .flatMap((group) => group.reviews.map((item) => item.id)),
+    filterTrajectories(
+      groups,
+      { ...filters, version: 'unredacted' },
+      [],
+    ).flatMap((group) => group.reviews.map((item) => item.id)),
     ['humanized'],
   );
   assert.deepEqual(
-    filterTrajectories(groups, { ...filters, version: 'extraction draft' }, [])
-      .flatMap((group) => group.reviews.map((item) => item.id)),
+    filterTrajectories(
+      groups,
+      { ...filters, version: 'extraction draft' },
+      [],
+    ).flatMap((group) => group.reviews.map((item) => item.id)),
     ['original'],
   );
   assert.deepEqual(
-    filterTrajectories(groups, filters, [])
-      .flatMap((group) => group.reviews.map((item) => item.id)),
+    filterTrajectories(groups, filters, []).flatMap((group) =>
+      group.reviews.map((item) => item.id),
+    ),
     ['humanized', 'redacted'],
   );
-  assert.equal(reviewContentLabel(humanized), 'Unredacted insights and summary');
+  assert.equal(
+    reviewContentLabel(humanized),
+    'Unredacted insights and summary',
+  );
   assert.equal(reviewContentLabel(original), 'Extraction draft');
   assert.equal(reviewContentLabel(reviews[2]), 'Redacted insights and summary');
 });
 
 void test('default navigation skips extraction drafts but preserves explicit historical links', () => {
   const original = review('original', '001', 'unredacted');
-  const humanized = { ...original, id: 'humanized', stage: 'humanize' as const };
+  const humanized = {
+    ...original,
+    id: 'humanized',
+    stage: 'humanize' as const,
+  };
   const redacted = review('redacted', '001', 'redacted');
   const legacy = { ...original, id: 'legacy', stage: 'historical' as const };
-  const privacyBaseline = { ...legacy, id: 'baseline', privacyStatus: 'unknown' as const };
+  const privacyBaseline = {
+    ...legacy,
+    id: 'baseline',
+    privacyStatus: 'unknown' as const,
+  };
   const reviews = [original, legacy, humanized, redacted, privacyBaseline];
   const before = structuredClone(reviews);
-  assert.deepEqual(visibleReviews(reviews).map((item) => item.id), ['humanized', 'redacted', 'baseline']);
+  assert.deepEqual(
+    visibleReviews(reviews).map((item) => item.id),
+    ['humanized', 'redacted', 'baseline'],
+  );
   assert.equal(visibleReviews(reviews, 'original')[0].id, 'original');
-  assert.ok(visibleReviews(reviews, 'legacy').some((item) => item.id === 'legacy'));
+  assert.ok(
+    visibleReviews(reviews, 'legacy').some((item) => item.id === 'legacy'),
+  );
   assert.deepEqual(visibleReviews([original, legacy]), []);
   assert.deepEqual(visibleReviews([], 'missing'), []);
   assert.deepEqual(reviews, before);

@@ -3,6 +3,14 @@ import { reviewContentLabel } from './trajectory-list.ts';
 
 export function reviewLabels(reviews: Review[]): Map<string, string> {
   const entries = reviews.map((review) => {
+    if (review.reviewLevel === 'global')
+      return {
+        id: review.id,
+        label:
+          review.projectName === 'Global insights'
+            ? 'Global insights'
+            : `${review.projectName} · Global insights`,
+      };
     const trajectory = review.sourcePath.match(/trajectory[-_ ]?(\d+)/i)?.[1];
     const title = review.summaryLines
       .filter((line) => /^#{1,6}\s+/.test(line.text))
