@@ -11,7 +11,7 @@ import { labelSummary, sha256 } from './v5-format.ts';
 
 async function fixture(
   version = 7,
-  stage: 'insight' | 'redaction' = 'redaction',
+  stage: 'insight' | 'humanize' | 'redaction' = 'redaction',
   markdown?: string,
 ) {
   const summary =
@@ -72,7 +72,7 @@ async function fixture(
 
 void test('imports compatible artifacts without a protocol whitelist and preserves their version', async () => {
   for (const version of [5, 6, 7, 12]) {
-    for (const stage of ['insight', 'redaction'] as const) {
+    for (const stage of ['insight', 'humanize', 'redaction'] as const) {
       const { payload } = await fixture(version, stage);
       const review = await parseV5Review(payload);
       assert.equal(review.hierarchy.protocolVersion, version);
@@ -86,9 +86,58 @@ void test('imports compatible artifacts without a protocol whitelist and preserv
   }
 });
 
+void test('saved-review Humanizer drafts preserve authorship and pending decisions without original provenance', async () => {
+  const card =
+    '# I001\nTitle: Verify results\nType: user-agent\nDescription: Verify a reported result.\nWorkflow: Inspect the independent result before reuse.\nExample: The user requested an independent check.\nEvidence: L003\n';
+  const { payload, manifest } = await fixture(9, 'humanize', card);
+  const draft = {
+    ...manifest,
+    format: 'oxygen-review-humanization/v1',
+    reviewerAddedIds: ['I001'],
+    input_sha256: 'must-not-be-treated-as-original-provenance',
+  };
+  const importDraft = (replacement = draft) =>
+    parseReviewImportFile(
+      JSON.stringify({
+        ...payload,
+        manifestJson: JSON.stringify(replacement),
+      }),
+    );
+  const { review } = await importDraft();
+  assert.equal(review.hierarchy.privacyStatus, 'unredacted');
+  assert.equal(review.hierarchy.provenance?.hashVerified, false);
+  assert.equal(review.hierarchy.provenance?.draftHashVerified, true);
+  assert.equal(
+    review.hierarchy.provenance?.sourceKind,
+    'saved-review-humanization',
+  );
+  assert.equal(review.hierarchy.provenance?.inputSha256, undefined);
+  assert.equal(review.hierarchy.provenance?.runComplete, false);
+  assert.equal(review.insights[0].authorship, 'reviewer');
+  assert.equal(review.insights[0].status, 'pending');
+  await assert.rejects(
+    importDraft({ ...draft, complete: true }),
+    /must be unredacted/,
+  );
+  await assert.rejects(
+    importDraft({ ...draft, reviewerAddedIds: ['I999'] }),
+    /reviewer authorship/,
+  );
+  await assert.rejects(
+    parseReviewImportFile(
+      JSON.stringify({
+        ...payload,
+        insightMarkdown: card.replace('Verify results', 'Changed title'),
+        manifestJson: JSON.stringify(draft),
+      }),
+    ),
+    /manifest hash/,
+  );
+});
+
 void test('file imports preserve recorded v8/v9 schemas and rich application examples', async () => {
   for (const version of [8, 9]) {
-    for (const stage of ['insight', 'redaction'] as const) {
+    for (const stage of ['insight', 'humanize', 'redaction'] as const) {
       const card = [
         '# I001',
         '',

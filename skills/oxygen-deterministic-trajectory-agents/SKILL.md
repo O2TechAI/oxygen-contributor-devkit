@@ -1,6 +1,6 @@
 ---
 name: oxygen-deterministic-trajectory-agents
-description: Generate a readable thematic summary, label its lines with Python, and run fresh insight and privacy-redaction agents using fixed calls with one input path. Accepts extracted Markdown trajectories, frozen JSON/JSONL trajectories, or existing Markdown summaries. Controls invocation, not deterministic model prose.
+description: Generate a readable thematic summary, label its lines with Python, and run fresh insight, Humanizer, and privacy-redaction agents using fixed calls with one input path. Accepts extracted Markdown trajectories, frozen JSON/JSONL trajectories, or existing Markdown summaries. Controls invocation, not deterministic model prose.
 ---
 
 # Summary and insight agents
@@ -11,7 +11,7 @@ Markdown summary. Prepare new workspace trajectories with the
 Prefer the exported `.md` transcript for analysis. A Markdown input is frozen as
 `source.md` and is the sole factual source; workers do not consult its source JSONL.
 
-Current skill has four gates: initialization and acceptance of each worker's outputs.
+Current skill has five gates: initialization and acceptance of each worker's outputs.
 The workers still interpret evidence and write prose. Python handles labeling,
 card validation, stage order, and execution records. This pipeline produces Markdown.
 
@@ -41,19 +41,21 @@ Worker contracts define permitted inputs, outputs, and tools:
 
 - [Summary worker](references/summary-worker.md): reads the frozen source and writes a neutral, readable account of the trajectory.
 - [Insight worker](references/insight-worker.md): reads the frozen source and working copies of the accepted summary pair, may repair factual errors or meaningful omissions while preserving neutral narration, then relabels and infers reusable project skill candidates.
-- [Redaction worker](references/redaction-worker.md): reads the accepted insight trio and writes privacy-edited outputs with new labels and citations.
+- [Humanizer worker](references/humanize-worker.md): reads accepted cards and summaries, lowers information density, and preserves card identities, types, citations, and factual meaning.
+- [Redaction worker](references/redaction-worker.md): reads the accepted humanized trio and writes privacy-edited outputs with new labels and citations.
 
 Fresh context excludes parent history; host instructions, tools, workspace, and
 sandbox still apply. Worker access restrictions are instructions, not a separate
 sandbox. Fixed settings do not guarantee identical model prose.
 
-## Four gates
+## Five gates
 
 | Gate | Required checks | Result |
 |---|---|---|
 | Initialize | Nonempty regular input that parses as JSON/JSONL or UTF-8 Markdown; new run destination. Live session storage must first be collected. | Freeze source, prompts, settings, and helpers. |
 | Accept summary | Recorded worker completed successfully; readable summary is nonempty UTF-8. | Parent generates labels and records accepted output hashes. |
-| Accept insight | Recorded worker completed successfully; final summary is nonempty UTF-8; labels reproduce it exactly; cards and citation targets are valid. | Accept the final unredacted trio. Empty insights are valid. |
+| Accept insight | Recorded worker completed successfully; final summary is nonempty UTF-8; labels reproduce it exactly; cards and citation targets are valid. | Seal the original extraction trio. Empty insights are valid. |
+| Accept Humanizer | Recorded worker completed successfully; summaries are unchanged; cards retain their count, order, IDs, Type, and exact Evidence fields. | Accept the humanized unredacted trio. |
 | Accept redaction | Recorded worker completed successfully; redacted labels reproduce the summary exactly; retained cards and citation targets are valid. | Mark processing complete. Empty summary and insights are allowed. |
 
 The prompts guide summary organization; exact headings are not acceptance gates.
@@ -79,13 +81,29 @@ Cards are written for people. The shared category reference's **Readable cards**
 guidance makes human understanding the highest editorial priority: reduce information
 density and omit secondary detail while retaining the method's defining choices.
 
+## Humanizer contract
+
+New runs read the editable [local Humanizer skill](../humanizer/SKILL.md) and its
+MIT license, plus the overriding [Oxygen wrapper](../../prompts/humanize.md).
+Preparation freezes and hashes these files; local edits affect subsequent runs
+without requiring an upstream commit or source-hash match. Existing runs use their
+saved copies. No network or global skill installation is needed. Missing or
+invalid guidance prevents preparation. This is one additional fresh worker.
+
+The worker can rewrite Title, Description, Workflow, and Example, including omitting
+secondary details for comfortable human reading. It preserves the central method,
+defining user requirements, exceptions, attribution, and outcome qualifications.
+Summaries remain byte-identical. The original extraction remains available for
+comparison. A core support problem stops the pass; there is no silent fallback.
+Structural acceptance cannot establish semantic fidelity or human readability.
+
 ## Run one input
 
 Run commands from this skill's directory. Replace INPUT and WORKER_ID with actual
 values and pass paths as data or separate subprocess arguments.
 
 1. Initialize: `python3 scripts/trajectory_agents.py prepare INPUT`.
-2. For each stage in order (`summary`, `insight`, then optional `redaction`):
+2. For each stage in order (`summary`, `insight`, `humanize`, then optional `redaction`):
    - Run `python3 scripts/trajectory_agents.py STAGE-call INPUT`.
    - Pass the returned arguments unchanged to the saved host tool:
      `collaboration.spawn_agent` (Codex) or the Agent tool (Claude Code).
@@ -102,7 +120,8 @@ values and pass paths as data or separate subprocess arguments.
 
 The CLI's completion status is an attestation from the parent; Python cannot
 query collaboration tools. The host tool log is authoritative for actual dispatch
-and completion. The saved call records are provenance, not an acceptance gate.
+and completion. Saved call hashes detect changes to dispatch records; they do not
+prove that a worker executed the call.
 
 For a Python host with asynchronous dispatch/wait adapters, the helper also exposes
 `await orchestrate(INPUT, dispatch, wait, redact=True)`. This function implements
@@ -110,9 +129,9 @@ initialize/resume, dispatch, wait, accept, and advance in one loop. `dispatch(ar
 returns the actual worker ID. `wait(worker_id)` returns a dict with `status: complete`
 only after successful termination and a successful task result. All other results
 stop the item. These adapters must be supplied by the host; the standalone CLI has
-no direct collaboration-tool connection. Use `redact=False` to stop after insights.
+no direct collaboration-tool connection. Use `redact=False` to stop after humanized insights.
 
-Only accepted redaction sets `run_complete: true`. Stopping after insight acceptance
+Only accepted redaction sets `run_complete: true`. Stopping after Humanizer acceptance
 completes the requested generation stages while overall privacy processing remains
 incomplete. Neither value grants release approval.
 
@@ -124,10 +143,12 @@ log and record the existing worker; never blindly spawn another worker.
 
 On resuming an interrupted run, run
 `python3 scripts/trajectory_agents.py verify-resume INPUT` once. It checks hashes of
-the frozen source, saved protocol files, and accepted outputs. The Python
-orchestrator does this automatically for existing runs. Normal stage transitions
-check completion state without repeatedly validating earlier outputs or the
-original input. Accepted outputs and saved protocol files must remain unchanged.
+the frozen source, saved protocol files, and accepted outputs, plus saved dispatch
+records in new runs. The Python orchestrator does this automatically for existing
+runs. Humanizer dispatch/recording/acceptance and the following redaction
+dispatch/acceptance also verify these files. Other normal stage transitions check
+completion state; none reread the original input. Accepted outputs and saved
+protocol files must remain unchanged.
 
 A stale `.operation-lock` requires reconciliation before removal. Worker errors or
 invalid outputs stop that item and preserve its artifacts. Do not repair prose in
@@ -149,7 +170,7 @@ starts a new run using the current prompts. It does not import old insights or
 redactions or run a summary worker. Continue with worker recording, waiting, and
 acceptance as above. Report the summary as imported and insights as generated.
 
-V7/v8 runs remain resumable with their frozen prompts and validators. V5/v6 runs
+Existing v7/v8/v9 runs without a saved `stage_order` keep the original three-stage order and have no Humanizer dispatch. V7/v8 runs remain resumable with their frozen prompts and validators. V5/v6 runs
 remain preserved; import their accepted summaries into a new run to continue.
 Existing review cards and annotations keep their original schema and categories. Historical Gxxx/Lxxx review-app importers
 need a separate adapter for the current format. This skill does not alter a
@@ -174,6 +195,7 @@ Runs are stored at INPUT.oxygen-agents/ and contain:
 
 - `summary/summary.md` and `summary/summary_labeled.md`;
 - `insight/summary.md`, `insight/summary_labeled.md`, and `insight/insight.md`;
+- `humanize/summary.md`, `humanize/summary_labeled.md`, and `humanize/insight.md`;
 - after redaction, `redaction/summary_redacted.md`, `redaction/summary_redacted_labeled.md`, and `redaction/insight_redacted.md`;
 - the frozen `source.md` for Markdown inputs (transcript or summary), or
   `trajectory.json` for JSON/JSONL inputs; `protocol/` snapshots, call records,

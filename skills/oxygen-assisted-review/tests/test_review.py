@@ -356,7 +356,7 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(result['savedVersion'], 0)
         self.assertEqual(result['outcome'], 'saved')
         self.assertTrue(result['refreshRequired'])
-        self.assertEqual(sorted(p.name for p in self.archive.iterdir()), ['.lock', '0000-initial', 'session.json'])
+        self.assertEqual(sorted(p.name for p in self.archive.iterdir()), ['0000-initial', 'session.json'])
         self.assertEqual(len(self.api.snapshots), 1)
         self.assertEqual(self.api.snapshots[0]['kind'], 'initial')
         self.assertEqual(self.api.snapshots[0]['note'], '')
@@ -489,6 +489,19 @@ class HelperTests(unittest.TestCase):
         with helper.locked(self.archive):
             with self.assertRaisesRegex(helper.ReviewError, "Another helper"):
                 self.apply(self.read())
+
+    def test_archive_operations_do_not_require_filesystem_advisory_locks(self):
+        with patch('fcntl.flock', side_effect=OSError('Filesystem locking unavailable')):
+            result = self.apply(self.read(), 'Keep this comment.')
+        self.assertEqual(result['savedVersion'], 1)
+        self.assertFalse((self.archive / '.operation-lock').exists())
+
+    def test_stale_archive_claim_requires_reconciliation(self):
+        (self.archive / '.operation-lock').mkdir()
+        with self.assertRaisesRegex(helper.ReviewError, 'reconcile'):
+            self.read()
+        (self.archive / '.operation-lock').rmdir()
+        self.read()
 
     def test_archive_git_and_symlink_guards(self):
         (self.root / ".git").mkdir()

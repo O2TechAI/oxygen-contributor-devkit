@@ -26,8 +26,13 @@ def parse_args() -> argparse.Namespace:
         help="Completed INPUT.oxygen-agents directory with a readable/labeled summary and insights",
     )
     parser.add_argument(
+        "--humanize-comparison",
+        type=Path,
+        help="Accepted single-session Humanizer comparison case derived from a saved review",
+    )
+    parser.add_argument(
         "--stage",
-        choices=("redaction", "insight"),
+        choices=("redaction", "insight", "humanize"),
         default="redaction",
         help="Completed stage to review (default: redaction)",
     )
@@ -111,14 +116,68 @@ def legacy_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def comparison_payload(args: argparse.Namespace) -> dict[str, object]:
+    """Import a review-derived draft without claiming original extraction provenance."""
+    case = args.humanize_comparison.resolve()
+
+    def checked(root, name, expected):
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("invalid comparison artifact path")
+        path = root
+        for part in relative.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError("comparison artifacts must not be symlinks")
+        data = path.read_bytes()
+        if sha256(data) != expected:
+            raise ValueError(f"comparison hash mismatch for {name}")
+        return data
+
+    manifest = json.loads((case / "manifest.json").read_bytes())
+    state = json.loads((case / "state.json").read_bytes())
+    experiment = json.loads((case.parent / "experiment.json").read_bytes())
+    if manifest.get("kind") != "single" or manifest.get("sourceKind") != "current-saved-review":
+        raise ValueError("expected a single-session saved-review comparison")
+    if state.get("status") != "accepted":
+        raise ValueError("Humanizer comparison has not been accepted")
+    for name, digest in experiment["protectedHashes"].items():
+        checked(case.parent, name, digest)
+    inputs = {name: checked(case, name, digest) for name, digest in manifest["inputHashes"].items()}
+    output = checked(case, "after.md", state["outputHashes"]["after.md"])
+    snapshot = json.loads(inputs["review-snapshot.json"])
+    contents = {"summary.md": inputs["summary.md"],
+                "summary_labeled.md": inputs["summary_labeled.md"], "insight.md": output}
+    settings = experiment["settings"]
+    draft_manifest = {
+        "format": "oxygen-review-humanization/v1",
+        "complete": False,
+        "configuration": {"protocol_version": 9, "model": settings["model"],
+                          "reasoning_effort": settings["reasoning_effort"]},
+        "reviewerAddedIds": [card["id"] for card in snapshot["insights"]
+                             if card.get("authorship") == "reviewer"],
+        "stages": {"humanize": {"status": "complete", "outputs": {"sha256": {
+            name: sha256(data) for name, data in contents.items()}}}},
+    }
+    return {
+        "projectName": args.project, "sourcePath": args.source, "format": "v5",
+        "protocolVersion": 9, "stage": "humanize",
+        "summaryMarkdown": contents["summary.md"].decode("utf-8"),
+        "summaryLabeledMarkdown": contents["summary_labeled.md"].decode("utf-8"),
+        "insightMarkdown": output.decode("utf-8"),
+        "manifestJson": json.dumps(draft_manifest, ensure_ascii=False),
+    }
+
+
 def main() -> int:
     args = parse_args()
-    if args.run_dir and (args.summary or args.insight):
-        print("--run-dir cannot be combined with --summary or --insight", file=sys.stderr)
+    if sum(bool(value) for value in (args.run_dir, args.humanize_comparison, args.summary or args.insight)) > 1:
+        print("Choose one input: --run-dir, --humanize-comparison, or --summary/--insight", file=sys.stderr)
         return 2
     try:
-        payload = v5_payload(args) if args.run_dir else legacy_payload(args)
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        payload = (v5_payload(args) if args.run_dir else comparison_payload(args)
+                   if args.humanize_comparison else legacy_payload(args))
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError) as error:
         print(f"Unable to prepare review: {error}", file=sys.stderr)
         return 1
 

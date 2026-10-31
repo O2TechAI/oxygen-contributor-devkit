@@ -83,12 +83,13 @@ The collection and stripping steps are standalone Python tools; skills handle th
   reusable skill-candidate extraction, and the shared six-field card schema.
 - `prompts/insight_categories.md` — shared selection criteria and readable synthetic
   examples, frozen into single-session insight and cross-session instructions.
+- `prompts/humanize.md` and the local [Humanizer skill](skills/humanizer/SKILL.md) — a shared prose pass that reduces information density while preserving the defining requirements and evidence.
 - `prompts/sensitive-redaction.md` — minimal privacy edits that preserve
   nonsensitive content and formatting.
 - `tools/` — utilities and supporting tools, including the Codex collector/stripper
   and the Claude Code variants (`collect_claude_sessions.py`,
   `strip_claude_tool_outputs.py`, `claude_trajectory_markdown.py`).
-- `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, and privacy-redaction workers.
+- `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, Humanizer, and privacy-redaction workers.
 - `skills/oxygen-cross-session-generation/` — infer shared reusable skill candidates from completed review exports.
 - `skills/oxygen-assisted-review/` — conversational review edits, request snapshots, and explicit privacy cleanup.
 - `review-app/` — the Oxygen human-review service and evidence-linked review UI.
@@ -99,6 +100,8 @@ When a contributor asks an agent to rewrite, add, remove, comment on, or label
 insights in the open review, use the
 [assisted-review skill](skills/oxygen-assisted-review/SKILL.md). It saves each
 request and resulting snapshot, then reloads the review with an in-page diff.
+Insight rewrites and additions use the local Humanizer within the editing agent,
+grounded in the current summary and preserving defining requirements.
 Explicit privacy requests discard earlier managed history and source-linked
 receipts, saving the sanitized result as a new `0000` baseline. The agent
 automatically refreshes or opens the saved review; ordinary deletions remain
@@ -117,11 +120,38 @@ temporary storage follows the system default or `TMPDIR`.
 After labeling and exporting a collection, use the
 [cross-session generation skill](skills/oxygen-cross-session-generation/SKILL.md)
 with its extracted export directory. It reads final edited summaries and both
-accepted and declined cards, validates completed labeling, and launches one fresh
-`gpt-6.1-sol` worker with high reasoning. Each new candidate needs concrete support
+accepted and declined cards, validates completed labeling, and launches a fresh
+`gpt-6.1-sol` synthesis worker with high reasoning, followed by a fresh Humanizer
+worker. The latter edits explanations without changing candidate selection or citations. Each new candidate needs concrete support
 from at least two distinct trajectories. Results are private drafts with qualified
 summary citations and source decisions; they require a new human review and do
 not modify existing reviews or create installable skills.
+
+### Automatic readability pass
+
+New extraction runs automatically humanize insight cards before the next step:
+single-session runs redact the humanized cards; cross-session runs return them as
+new private drafts. The extra worker lowers information density while preserving
+defining requirements, factual qualifications, card identity, and evidence.
+Original extraction files remain separate, and existing runs keep their saved
+behavior. The local Humanizer skill and Oxygen instructions are frozen into
+each new run. Failed passes stop the item; they do not silently publish the raw
+extraction. Humanization is not privacy editing or human approval.
+
+`skills/humanizer/SKILL.md` was copied from a clone of the current
+[Humanizer repository](https://github.com/blader/humanizer), with its MIT license
+retained alongside it. This local file is the editable source for both pipelines;
+there is no upstream commit pin or source-hash allowlist. Local changes apply to
+new runs. Existing runs use their saved copies and integrity hashes. Preparation
+does not fetch upstream or require a global skill installation.
+
+For an unredacted single-session review, `publish-review.py --stage humanize`
+imports the accepted rewritten trio with its own verified hashes. The default
+remains `--stage redaction`; `--stage insight` explicitly selects raw extraction.
+The review app labels humanized output **Unredacted insights and summary** and
+redaction output **Redacted insights and summary**. Raw extraction drafts stay
+out of default navigation; they remain accessible through their review links
+and the **Earlier extraction drafts** filter.
 
 ## 1. Collect workspace sessions
 
@@ -487,15 +517,18 @@ the original project. All three fields support
 Markdown paragraphs without mandatory bold lead-ins. Cards live directly in
 `insight.md` and `insight_redacted.md`.
 
-For the complete workflow, run redaction after insight acceptance. Redaction
+After insight acceptance, run and accept the fresh Humanizer worker. It writes a
+separate readable version while preserving the summary, card identities, and
+evidence. For the complete workflow, run redaction after Humanizer acceptance. Redaction
 changes sensitive content and makes necessary local repairs while preserving
 nonsensitive wording and formatting; it regenerates labels and updates citations.
 An existing Markdown summary is also a valid input, using only the evidence it
 contains. Follow the skill's dispatch, worker-ID recording, successful completion,
 and acceptance sequence for every stage. Preparation alone does not launch workers.
 
-Use the final files in `insight/` for unredacted review; `summary/` preserves the
-first accepted draft. Use the files in `redaction/` for privacy-edited review.
+Use the final files in `humanize/` for unredacted review; `insight/` preserves the
+original extraction and `summary/` the first summary draft. Use the files in
+`redaction/` for privacy-edited review.
 Only accepted redaction marks the full trajectory run complete. A failed item
 retains its artifacts and failure record; independent items may continue.
 
@@ -552,7 +585,7 @@ editor and copied drafting prompt use the recorded schema. New v9 runs preserve
 existing reviews and frozen v7/v8 runs. Verified summaries from v5–v9 can seed
 new v9 insight runs.
 
-Review names include the trajectory number, summary title, original/redacted
+Review names include the trajectory number, summary title, unredacted/redacted
 version, and run identifier. This distinguishes different trajectories and reruns
 even when they share a project name such as `user-simulation`.
 
@@ -575,15 +608,15 @@ earlier imports may already be present. Import the current run through the
 publisher rather than regenerating the historical example seed.
 
 From the toolkit root, run both commands below for each trajectory that completed
-all three worker stages. Replace the example paths, project label, and source
+all four worker stages. Replace the example paths, project label, and source
 labels with values for this run:
 
 ```bash
 python3 tools/publish-review.py \
   --project my-contributed-project \
-  --source run-20260922T203000Z-trajectory-001-original \
+  --source run-20260922T203000Z-trajectory-001-humanized \
   --run-dir /absolute/private-run/trajectory-001.md.oxygen-agents \
-  --stage insight \
+  --stage humanize \
   --server http://127.0.0.1:3000
 
 python3 tools/publish-review.py \
@@ -628,7 +661,7 @@ The agent should maintain a report in the new run directory containing:
 - the target workspace, toolkit revision, run paths, and effective worker settings;
 - collection counts and errors, plus each snapshot's conversion outcome;
 - eligible, excluded, and selected Markdown paths with sizes and selection rationale;
-- accepted summary, insight, and redaction counts, with failures and blockers;
+- accepted summary, insight, Humanizer, and redaction counts, with failures and blockers;
 - the per-trajectory manifests, final artifact paths, and example Markdown links;
 - both review IDs per fully processed trajectory, direct local links, and the
   server's terminal/session reference so it can be stopped later.

@@ -56,7 +56,7 @@ Older reviews retain Scope/Takeaway, original origin categories, and the
 [historical drafting prompt](public/reviewer-insight-prompt-v7.md). Existing
 annotations are not migrated or rewritten.
 
-Review names include the trajectory number, summary title, original/redacted
+Review names include the trajectory number, summary title, unredacted/redacted
 version, and run identifier. This distinguishes different trajectories and reruns
 even when they share a project name such as `example-project`.
 
@@ -127,6 +127,10 @@ asking an agent to edit the open review. The URL identifies the review and
 selected insight. The helper retains each request and its resulting snapshot;
 after saving, the agent automatically refreshes or opens the returned link to
 show **Changes** inside the app.
+The agent uses the repository's local Humanizer when rewriting or adding insights,
+as part of the same edit. It preserves the current summary as factual support,
+the user's defining requirements, and useful structure while reducing information
+density. Unrelated cards remain unchanged.
 Workspace browser tools such as Codex use the helper's `openUrl`; `url` is the
 client-facing link. Reopening a client's temporary forwarded port from the
 workspace can fail, so check the server address and host before opening it.
@@ -165,8 +169,27 @@ python3 ../tools/publish-review.py \
 
 `--source` is required and must be a display-safe identifier, not a sensitive
 local path.
-Use `--stage insight` only for restricted unredacted review; such a review
-cannot be marked complete.
+Use `--stage humanize` for **Unredacted insights and summary**: humanized cards
+and their unchanged supporting summary. Use `--stage redaction` for **Redacted
+insights and summary**. `--stage insight` remains an explicit import of an earlier
+extraction draft; it is excluded from default navigation and the default version
+filter. Its direct review link and **Earlier extraction drafts** filter remain
+available. Neither humanized nor extraction drafts can be marked complete.
+
+An accepted Humanizer comparison derived from a saved review can also be loaded:
+
+```bash
+python3 ../tools/publish-review.py \
+  --project my-project \
+  --source run-example-trajectory-001-humanized \
+  --humanize-comparison ../runs/humanizer-comparison/single-01
+```
+
+This creates a separate draft with pending decisions. The publisher verifies the
+comparison's frozen inputs and accepted output. The app verifies the draft files
+and citations and preserves reviewer authorship. Page information identifies the
+saved-review origin; exports do not claim verified original extraction provenance.
+The source review and privacy-reset history remain untouched.
 
 The publisher verifies the selected files against `manifest.json`. The API
 independently verifies matching manifest/payload protocol versions, stage completion, artifact hashes,
@@ -210,17 +233,18 @@ edits made while a save is in flight. Failed saves retain local changes and show
 **Retry autosave**; export and switching reviews wait for a successful save.
 Apply or cancel an open editor before exporting. Closing or refreshing with a
 pending save shows a browser warning. Unapplied editor drafts are not autosaved.
-Original/unredacted reviews and drafts can be exported without completing them.
-Open **Trajectories** for one row per trajectory, with its original and redacted
+Unredacted reviews and drafts can be exported without completing them.
+Open **Trajectories** for one row per trajectory, with its unredacted and redacted
 versions, review status, and accepted/declined/pending counts. Search or filter by
 run, version, and review status. On initial load, redacted versions from the
-current run are selected by default, including unfinished reviews. Original
-versions start unchecked and can be selected manually. Use **Select all filtered**, **Select all in
+current run are selected by default, including unfinished reviews. Unredacted
+versions use the humanized output, start unchecked, and can be selected manually. Use **Select all filtered**, **Select all in
 current run**, or individual checkboxes; **View selected** shows the full selection.
 Selections remain checked while you open and edit individual reviews. Apply editor changes before opening another review or exporting; pending saves
 are flushed automatically.
-The version filter offers **All versions**, **Original**, and **Redacted**;
-All versions includes only those two versions. The run filter lists individual
+The default **All review versions** filter shows humanized unredacted, redacted,
+and global reviews. Each can also be shown separately. **Earlier extraction drafts** explicitly opens older, raw
+extraction imports; these are never relabeled as humanized output. The run filter lists individual
 runs. **View selected** shows checked versions across runs and temporarily
 disables the run filter; returning to the full list restores that filter.
 
