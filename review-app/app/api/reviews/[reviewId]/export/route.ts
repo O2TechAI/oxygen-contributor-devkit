@@ -8,7 +8,10 @@ export async function GET(
   if (!(await isAuthenticated(request))) return unauthorizedResponse();
   try {
     const { reviewId } = await context.params;
-    const exported = await exportReview(reviewId);
+    const history = new URL(request.url).searchParams.get('history');
+    const exported = await exportReview(reviewId, {
+      includeHistory: history === '1' || history === 'true',
+    });
     return new Response(exported.body, {
       headers: {
         'content-type': exported.contentType,
