@@ -51,6 +51,7 @@ export function TrajectoryPanel({
   const [status, setStatus] = useState('all');
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [format, setFormat] = useState('zip');
+  const [includeHistory, setIncludeHistory] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [downloaded, setDownloaded] = useState('');
@@ -100,6 +101,7 @@ export function TrajectoryPanel({
         body: JSON.stringify({
           reviewIds: selected.map((review) => review.id),
           format,
+          includeHistory,
         }),
       });
       if (!response.ok) {
@@ -421,6 +423,18 @@ export function TrajectoryPanel({
                 <option value="zip">ZIP — readable files</option>
                 <option value="json">Combined JSON</option>
               </select>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={includeHistory}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setIncludeHistory(event.target.checked);
+                    setDownloaded('');
+                  }}
+                />
+                Include edit history
+              </label>
               <Button
                 disabled={
                   pending ||
@@ -445,6 +459,14 @@ export function TrajectoryPanel({
             insights. Pending insights count as accepted in the export; saved
             labels stay unchanged. Deleted insights are excluded.
           </p>
+          {includeHistory && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              Edit history adds history.json and history.md to each review:
+              every saved version since import, including deleted insights, your
+              request text, and diffs. Keep this download private; it is not a
+              contribution export.
+            </p>
+          )}
           {selected.length > 0 && counts.accepted + counts.declined === 0 && (
             <p className="text-xs text-muted-foreground">
               No exportable insights yet; this download will contain summaries

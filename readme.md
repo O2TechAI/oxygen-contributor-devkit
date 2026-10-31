@@ -645,7 +645,10 @@ Selecting evidence opens and highlights its Summary line. Summary edits invalida
 affected approvals, and only a redacted review with every Insight accepted or
 rejected can be completed. Export produces a bundle containing reviewed Summary,
 labeled Summary, Insights, provenance, and decisions. Request history stays in
-the private assisted-review archive rather than contribution exports. The launch
+the private assisted-review archive rather than contribution exports. For research
+use, the reviewer can opt in to an export with edit history, which adds every
+saved version, request notes, and diffs; see
+[`review-app/README.md`](review-app/README.md#edit-history-export). The launch
 instruction completes at verified local imports; approval and export require
 the contributor's review.
 

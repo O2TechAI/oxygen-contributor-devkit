@@ -21,6 +21,7 @@ import { parseSummary, validateSummaryGroups } from '@/lib/summary-format';
 import { parseGlobalReview } from '@/lib/global-review';
 import { parseV5Review } from '@/lib/review-import';
 import { exportLabelingSummary } from '@/lib/export-labeling';
+import { historyFiles } from '@/lib/history-export';
 import {
   labeledSummaryMarkdown,
   serializeInsights,
@@ -952,15 +953,53 @@ export async function sanitizeReviewHistory(
   }
 }
 
-export async function exportReview(reviewId: string) {
+export type ExportOptions = {
+  /** Add history.json and history.md with every saved version (opt-in, private). */
+  includeHistory?: boolean;
+};
+
+export async function exportReview(
+  reviewId: string,
+  { includeHistory = false }: ExportOptions = {},
+) {
   await ensureDatabase();
   const reviews = await listReviews();
   const review = reviews.find((item) => item.id === reviewId);
   if (!review) throw new Error('Review not found.');
-  return exportReviewSnapshot(prepareReviewExport(review));
+  const prepared = prepareReviewExport(review);
+  if (!includeHistory) return exportReviewSnapshot(prepared);
+  // With history the download is always a bundle, also for legacy Markdown reviews.
+  const files = {
+    ...reviewFiles(prepared),
+    ...historyFiles(await getReviewHistory(review.id)),
+  };
+  return {
+    body: JSON.stringify(
+      {
+        format: 'oxygen-human-review-bundle/v1',
+        reviewId: review.id,
+        historyIncluded: true,
+        files,
+      },
+      null,
+      2,
+    ),
+    contentType: 'application/json; charset=utf-8',
+    filename: `${review.id}-review-bundle-with-history.json`,
+  };
 }
 
-export async function exportReviews(reviewIds: string[]) {
+function reviewFiles(review: ExportReview): Record<string, string> {
+  const exported = exportReviewSnapshot(review);
+  return review.format === 'v5'
+    ? JSON.parse(exported.body).files
+    : { 'review.md': exported.body };
+}
+
+export async function exportReviews(
+  reviewIds: string[],
+  { includeHistory = false }: ExportOptions = {},
+) {
   if (
     !reviewIds.length ||
     reviewIds.length > 500 ||
@@ -974,13 +1013,16 @@ export async function exportReviews(reviewIds: string[]) {
     if (!review) throw new Error('Review not found.');
     return prepareReviewExport(review);
   });
-  const bundles = selected.map((review) => {
-    const exported = exportReviewSnapshot(review);
-    const files =
-      review.format === 'v5'
-        ? JSON.parse(exported.body).files
-        : { 'review.md': exported.body };
-    return {
+  const bundles = [];
+  for (const review of selected) {
+    const files = reviewFiles(review);
+    let historyVersions: number | undefined;
+    if (includeHistory) {
+      const history = await getReviewHistory(review.id);
+      Object.assign(files, historyFiles(history));
+      historyVersions = history.snapshots.length;
+    }
+    bundles.push({
       reviewId: review.id,
       projectName: review.projectName,
       sourcePath: review.sourcePath,
@@ -997,9 +1039,10 @@ export async function exportReviews(reviewIds: string[]) {
         (item) => item.status === 'rejected',
       ).length,
       insightCount: review.insights.length,
+      ...(includeHistory ? { historyVersions } : {}),
       files,
-    };
-  });
+    });
+  }
   const exportedAt = new Date().toISOString();
   return {
     body: JSON.stringify(
@@ -1007,13 +1050,14 @@ export async function exportReviews(reviewIds: string[]) {
         format: 'oxygen-human-review-collection/v1',
         exportedAt,
         reviewCount: bundles.length,
+        ...(includeHistory ? { historyIncluded: true } : {}),
         reviews: bundles,
       },
       null,
       2,
     ),
     contentType: 'application/json; charset=utf-8',
-    filename: `oxygen-reviews-${exportedAt.replace(/[:.]/g, '-')}.json`,
+    filename: `oxygen-reviews${includeHistory ? '-with-history' : ''}-${exportedAt.replace(/[:.]/g, '-')}.json`,
   };
 }
 

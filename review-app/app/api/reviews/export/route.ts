@@ -15,6 +15,14 @@ export async function POST(request: Request) {
   if (format !== 'json' && format !== 'zip') {
     return Response.json({ error: 'Choose ZIP or JSON.' }, { status: 400 });
   }
+  const includeHistory =
+    (payload as { includeHistory?: unknown } | null)?.includeHistory ?? false;
+  if (typeof includeHistory !== 'boolean') {
+    return Response.json(
+      { error: 'includeHistory must be true or false.' },
+      { status: 400 },
+    );
+  }
   if (
     !Array.isArray(reviewIds) ||
     !reviewIds.length ||
@@ -28,7 +36,7 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const exported = await exportReviews(reviewIds);
+    const exported = await exportReviews(reviewIds, { includeHistory });
     const body =
       format === 'zip'
         ? collectionZip(JSON.parse(exported.body))

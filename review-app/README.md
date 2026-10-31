@@ -222,6 +222,8 @@ Scope/Takeaway cards. The database stores these formats in its existing JSON col
   the card and its edits. Trash **deletes** the card from the current review
   after confirmation. Deleted cards are excluded from exports, including their
   original and revision content; stored originals and history remain preserved.
+  The opt-in edit-history export is the exception: its earlier versions still
+  contain cards that were deleted later.
 - Completion requires a redacted input and an accepted or rejected decision
   for every Insight. Empty Insight output is valid.
 
@@ -248,9 +250,10 @@ disables the run filter; returning to the full list restores that filter.
 
 **Export selected (N)** downloads a ZIP by default, organized by run, trajectory,
 and review version, with `manifest.json` listing every included review and its
-artifact directory. **Combined JSON** remains available. Every export contains
-only the latest saved edited content. Original copies, previous revisions,
-change notes, and trashed insights are excluded. The preview reports selected trajectories,
+artifact directory. **Combined JSON** remains available. By default an export
+contains only the latest saved edited content. Original copies, previous revisions,
+change notes, and trashed insights are excluded unless **Include edit history** is
+checked (see below). The preview reports selected trajectories,
 versions, and accepted/declined Insight counts, including pending insights in the
 accepted total. Both single-review and bulk export warn when labeling is incomplete
 and offer **Keep labeling** or **Export anyway**. Pending insights export as
@@ -258,9 +261,11 @@ accepted by default; their saved labels and the review's completion state remain
 unchanged. Insights marked **Evidence changed** remain excluded until reviewed,
 and the warning reports their count separately. Deleted insights stay excluded.
 
-`POST /api/reviews/export` accepts `reviewIds` and optional `format` (`zip` or `json`,
-default `json`). Historical export options from older clients are ignored;
-exports always contain only the latest content. Open `?review=<id>&trajectories=1&run=<run-id>`
+`POST /api/reviews/export` accepts `reviewIds`, optional `format` (`zip` or `json`,
+default `json`), and optional `includeHistory` (`true` or `false`, default `false`).
+Other historical export options from older clients are ignored. A single review
+downloads from `GET /api/reviews/<id>/export`; add `?history=1` to include its
+history. Open `?review=<id>&trajectories=1&run=<run-id>`
 to show that run with its redacted versions selected immediately; this does not
 reset any reviews. Reopening the panel preserves your checkbox choices, including
 an explicitly cleared selection.
@@ -285,8 +290,31 @@ whose `files` object contains:
 
 Combined bundles contain the same per-review files and accepted/declined counts.
 Historical legacy-format Markdown exports include all card decisions and an
-embedded JSON record of the latest saved content only. Internal originals and
-revision history remain stored for the review app; they are never exported.
+embedded JSON record of the latest saved content only. Without the history
+option, internal originals and revision history remain stored for the review app
+and are not exported.
+
+### Edit history export
+
+**Include edit history** in the Trajectories panel, or **Export with history** in
+the ⋯ menu, adds two files to each review's bundle; the latest-content files above
+are unchanged:
+
+- `history.json` (`oxygen-review-history/v1`): every saved version, oldest first.
+  Version 0 is the imported original (or the sanitized baseline after privacy
+  cleanup). Each later version is one save: browser decisions and edits, or an
+  assisted-review request. Each snapshot has `version`, `kind` (`initial`, `edit`,
+  or `privacy`), `createdAt`, `note` (for assisted-review saves, the exact request),
+  optional `requestId`, and the complete `state`: summary, summary lines, and
+  insight cards with their statuses. Embedded `originalText` fields are omitted.
+- `history.md`: the same versions as a readable timeline, with each note quoted
+  and a diff against the previous version.
+
+The collection JSON adds `historyIncluded: true` and per-review `historyVersions`;
+filenames include `with-history`. History can contain request text, deleted cards,
+and every pre-redaction edit, so treat these downloads as private research data,
+not contribution exports. Explicit privacy cleanup still discards earlier history
+first.
 
 The built-in example is directly addressable at
 `?review=rich-summary-insight-keys-example`.

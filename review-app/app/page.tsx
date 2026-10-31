@@ -14,6 +14,7 @@ import {
   Download,
   FilePlus2,
   FileText,
+  History,
   Lightbulb,
   List,
   LogOut,
@@ -173,6 +174,7 @@ export default function Home() {
   const [batchExportOpen, setBatchExportOpen] = useState(false);
   const [exportIds, setExportIds] = useState<string[]>([]);
   const [exportWarningOpen, setExportWarningOpen] = useState(false);
+  const [exportWithHistory, setExportWithHistory] = useState(false);
 
   const navigationReviews = visibleReviews(reviews, activeId);
   const active =
@@ -943,10 +945,18 @@ export default function Home() {
     setBatchExportOpen(true);
   }
 
-  async function downloadActiveReview() {
+  async function exportActiveReview(includeHistory: boolean) {
+    if (!active || !(await autosave.flush())) return;
+    setExportWithHistory(includeHistory);
+    if (exportLabelingSummary([active]).incompleteReviews > 0)
+      setExportWarningOpen(true);
+    else await downloadActiveReview(includeHistory);
+  }
+
+  async function downloadActiveReview(includeHistory = exportWithHistory) {
     if (!active || editorTarget !== null || !(await autosave.flush())) return;
     const link = document.createElement('a');
-    link.href = `/api/reviews/${active.id}/export`;
+    link.href = `/api/reviews/${active.id}/export${includeHistory ? '?history=1' : ''}`;
     link.download = '';
     document.body.appendChild(link);
     link.click();
@@ -1156,15 +1166,20 @@ export default function Home() {
                     : 'Save pending changes automatically and export'
                 }
                 aria-label="Export reviewed artifacts"
-                onClick={async () => {
-                  if (!(await autosave.flush())) return;
-                  if (exportLabelingSummary([active]).incompleteReviews > 0)
-                    setExportWarningOpen(true);
-                  else await downloadActiveReview();
-                }}
+                onClick={() => exportActiveReview(false)}
               >
                 <Download data-icon="inline-start" />
                 Export
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                title="Private download: reviewed artifacts plus every saved version, request text, and diffs"
+                aria-label="Export reviewed artifacts with edit history"
+                onClick={() => exportActiveReview(true)}
+              >
+                <History data-icon="inline-start" />
+                Export with history
               </Button>
               <Button variant="ghost" onClick={openBatchExport}>
                 <List data-icon="inline-start" />
