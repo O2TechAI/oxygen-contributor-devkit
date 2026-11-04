@@ -21,6 +21,36 @@ links and a review interface for deciding what to keep, edit, or decline.
 ---
 
 
+## Start Oxygen on your computer
+
+```bash
+git clone <this repository> oxygen-contributor-devkit
+cd oxygen-contributor-devkit
+./oxygen
+```
+
+Oxygen opens in your browser and does the rest from there:
+
+1. **Projects** lists the folders where Codex or Claude Code recorded sessions on this
+   computer.
+2. **New run** lets you pick the sessions to process (the earliest, a middle and the
+   latest are suggested), the language of the summaries and cards (中文 or English;
+   technical terms stay in English), and the agent, model and reasoning effort.
+3. **Progress** shows each session moving through Summary, Insights, Readability and
+   Privacy with the time every stage took. A finished session can be reviewed while
+   the others are still running.
+4. **Review** is the card-by-card review with the Summary one tab away and an agent
+   composer for asking about or editing a card.
+
+It needs Python 3.10+, Node.js 22.13+, and Codex or Claude Code signed in on this
+computer. Everything stays local: only the sessions you select are copied into
+`~/.oxygen/runs/` (change it with `OXYGEN_HOME`), and their text goes to the agent you
+choose through your own login. See [`review-app/README.md`](review-app/README.md#projects-runs-and-the-local-service)
+for the details and settings.
+
+The agent-driven instructions below do the same work from inside a Codex or Claude Code
+session and remain supported.
+
 ## Launch the complete pipeline from Codex
 
 With the toolkit already cloned under your workspace, open Codex there and paste

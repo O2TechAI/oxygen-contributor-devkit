@@ -3,5 +3,7 @@ declare namespace Cloudflare {
     DB: D1Database;
     OXYGEN_REVIEW_USERNAME?: string;
     OXYGEN_REVIEW_PASSWORD?: string;
+    OXYGEN_AGENT_BRIDGE_URL?: string;
+    OXYGEN_AGENT_BRIDGE_TOKEN?: string;
   }
 }

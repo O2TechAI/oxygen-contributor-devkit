@@ -39,6 +39,47 @@ or inaccurate attribution. Reject generic,
 redundant, misleading, or unsupported candidates. Preserve uncertainty and
 separate proposed, attempted, reported, and observed outcomes in examples.
 
+### Review one card at a time
+
+The review page opens in a one-card layout. It shows the current Insight with the
+text of each cited Summary line directly beneath it, so a decision does not need
+scrolling through the full Summary. Accepting or declining moves to the next card that
+still needs a decision, continuing into the next trajectory's review when the current
+one is finished. The two buttons beside the progress count switch to the side-by-side
+Summary and cards layout; the choice is remembered in this browser. Clicking an
+evidence label opens that line in the side-by-side layout.
+
+Keyboard shortcuts work in the one-card layout unless a dialog or text field has
+focus: `A` accept, `D` decline, `E` edit, `J` or the right arrow for the next card,
+`K` or the left arrow for the previous card. Nothing is accepted in bulk.
+
+### Ask or edit with your own agent
+
+A bar at the bottom of the review page talks to the Codex or Claude Code already
+installed and signed in on this computer. **Ask** answers questions about the review.
+**Edit** revises the selected card, or any cards when the scope is "Whole review", and
+can add a new card. Edit is available for skill-candidate (v9) reviews. Edited and added cards go
+back to Pending, appear in **Changes** with the request, and can be undone from the bar.
+Choose the agent, model and reasoning effort beside the input; the lists come from the
+installed CLI. Press `/` to focus the input and Enter to send.
+
+The page does not run the agents itself. A small bridge on this computer does, using
+your own CLI login:
+
+```bash
+export OXYGEN_AGENT_BRIDGE_TOKEN="$(openssl rand -hex 24)"
+npm run agent-bridge          # terminal 1: listens on 127.0.0.1:3777
+npm run dev:node              # terminal 2: same token in its environment
+```
+
+The bridge accepts only loopback requests that carry the token, refuses browser
+requests, runs at most two requests at once and stores nothing. The review app calls
+it from its server, so the token never reaches the browser. Set
+`OXYGEN_AGENT_BRIDGE_URL` or `OXYGEN_AGENT_BRIDGE_PORT` to use another port, and
+`OXYGEN_CODEX_BIN` or `OXYGEN_CLAUDE_BIN` for a CLI outside `PATH`. Without the token the
+bar says the connection is off. A request sends the review's Summary lines and cards, and
+your message, to the provider you choose.
+
 ### Add a missing insight
 
 Choose **Add insight**, paste one Markdown card, **Preview card**, add it, decide,
@@ -371,3 +412,43 @@ and original candidate IDs in the JSON snapshot, alongside the source catalog.
 Global snapshots are second-stage outputs, not new individual extraction inputs.
 The generation command remains a separate agent workflow; importing does not
 start model calls or regenerate candidates in the browser.
+
+## Projects, runs and the local service
+
+`./oxygen` (from the toolkit root) or `npm run oxygen` starts two processes on
+`127.0.0.1`: this app and a local service (`bridge/agent-bridge.ts`). The service is the
+only part that touches your agent sessions and your Codex / Claude Code installation; the
+app reaches it with a random per-start token, so the browser never sees the token.
+
+| Page | Address | What it does |
+| --- | --- | --- |
+| Projects | `/` | Projects with recorded sessions, recent runs, and a shortcut to the next card waiting for review. |
+| New run | `/runs/new?workspace=PATH` | Choose sessions, language, agent, model and reasoning effort. |
+| Run | `/runs?id=RUN` | Per-session progress with stage timings. **Review** imports the finished session and opens it. |
+| Review | `/review?review=ID` | One card at a time with a Summary tab, the full side-by-side layout and the agent composer. |
+
+Links of the form `/?review=ID` from earlier versions still open the review.
+
+How a run works: the service starts `tools/oxygen_run.py`, which copies only the selected
+sessions into `OXYGEN_HOME/runs/<id>/`, converts them to Markdown transcripts, and runs the
+four worker stages for each one (three at a time) through the same `orchestrate` function
+and acceptance checks as the agent-driven pipeline. Progress is written to the run's
+`state.json`. Stopping a run ends its worker processes; sessions already finished stay
+reviewable. A run whose process disappeared is shown as stopped.
+
+Workers are headless `codex exec` (workspace-write sandbox, no network) or `claude -p`
+processes started with your own login. Claude Code has no operating-system sandbox here,
+so its shell access is limited to reading helpers and the run's own label script; it cannot
+run arbitrary commands.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OXYGEN_HOME` | `~/.oxygen` | Runs (`runs/`) and the review database (`reviews.sqlite`). |
+| `OXYGEN_PORT` | `3000` | Port of this app (the next free port is used if busy). |
+| `OXYGEN_CODEX_HOME` | `$CODEX_HOME` or `~/.codex` | Where Codex sessions are read from. |
+| `OXYGEN_CLAUDE_CONFIG_DIR` | `$CLAUDE_CONFIG_DIR` or `~/.claude` | Where Claude Code sessions are read from. |
+| `OXYGEN_CODEX_BIN`, `OXYGEN_CLAUDE_BIN` | `codex`, `claude` | The command-line tools to run. |
+| `OXYGEN_PYTHON` | `python3` | Python 3.10+ used for the runner. |
+
+Set `OXYGEN_REVIEW_USERNAME` and `OXYGEN_REVIEW_PASSWORD` before starting to require a
+login. The services never listen on a public interface.
