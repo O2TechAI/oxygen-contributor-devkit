@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  agentEditNote,
   agentSchema,
   applyCards,
   buildPrompt,
@@ -132,4 +133,25 @@ void test('a card identical to the saved one is left alone', () => {
   const result = applyCards(context.insights, [same as never]);
   assert.deepEqual(result.changed, []);
   assert.equal(result.insights[0].status, 'accepted');
+});
+
+void test('the agent edit note keeps the whole request and the explanation', () => {
+  const request = `Make the workflow steps plainer. ${'Keep the evidence. '.repeat(40)}`;
+  assert.ok(request.length > 200);
+  const note = agentEditNote(
+    `  ${request}  `,
+    'I rewrote steps 2 and 3.\nThe evidence is unchanged.',
+  );
+  assert.equal(
+    note,
+    `Agent edit requested: ${request.trim()}\n\n` +
+      "Agent's explanation: I rewrote steps 2 and 3.\nThe evidence is unchanged.",
+  );
+});
+
+void test('the agent edit note leaves out an empty explanation', () => {
+  assert.equal(
+    agentEditNote('Shorten I002.', '   '),
+    'Agent edit requested: Shorten I002.',
+  );
 });

@@ -76,7 +76,11 @@ import {
   parseReviewerInsight,
   reviewerInsightDraft,
 } from '@/lib/reviewer-insight';
-import { applyCards, type AgentResult } from '@/lib/agent-prompt';
+import {
+  agentEditNote,
+  applyCards,
+  type AgentResult,
+} from '@/lib/agent-prompt';
 import { reviewLabels } from '@/lib/review-label';
 import {
   readView,
@@ -451,7 +455,7 @@ export default function Home() {
     };
     updateActive(
       (review) => ({ ...review, insights: merged.insights }),
-      `Agent edit: ${message.slice(0, 200)}`,
+      agentEditNote(message, result.answer),
     );
     setSelectedInsight(merged.changed[0] ?? merged.added[0]);
     return { changed: merged.changed, added: merged.added };

@@ -245,6 +245,19 @@ function sameCard(insight: Insight, card: AgentCard) {
 }
 
 /**
+ * The revision note saved with an agent edit: the whole request and the
+ * agent's own explanation, so the exported history shows what was asked and
+ * why the cards changed. Neither part is shortened.
+ */
+export function agentEditNote(message: string, answer: string) {
+  const explanation = answer.trim();
+  return [
+    `Agent edit requested: ${message.trim()}`,
+    ...(explanation ? [`Agent's explanation: ${explanation}`] : []),
+  ].join('\n\n');
+}
+
+/**
  * Merge the proposed cards into the review. Changed cards go back to Pending;
  * new cards are appended with the next sequential ID, as the saved format needs.
  */
