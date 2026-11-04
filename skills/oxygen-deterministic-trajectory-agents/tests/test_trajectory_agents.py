@@ -132,14 +132,72 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.accept(self.source, "summary")
         self.assertIn("prompt", RUN.issue_call(self.source, "insight"))
 
-    def test_codex_host_notes_keep_exec_limits_and_model_is_fixed(self):
+    def test_codex_host_notes_keep_exec_limits_and_defaults_are_unchanged(self):
         self.assertIn(b"`functions.exec` output limits", RUN.fixed_template("summary"))
-        with self.assertRaisesRegex(RUN.RunError, "codex_host_model_is_fixed"):
-            RUN.prepare(self.source, model="opus")
+        self.assertEqual(RUN.configuration()["model"], "gpt-6.1-sol")
+        self.assertEqual(RUN.configuration()["reasoning_effort"], "high")
+        self.assertNotIn("language", RUN.configuration())
         other = self.root / "other.jsonl"
         other.write_bytes(self.original)
         RUN.prepare(other, host="claude", model="sonnet")
         self.assertEqual(RUN.issue_call(other, "summary")["model"], "sonnet")
+
+    def test_chosen_model_effort_and_language_are_saved_and_used(self):
+        RUN.prepare(self.source, model="gpt-6-luna", effort="low", language="zh")
+        manifest = json.loads((self.run / "manifest.json").read_bytes())
+        config = manifest["configuration"]
+        self.assertEqual((config["model"], config["reasoning_effort"], config["language"]),
+                         ("gpt-6-luna", "low", "zh"))
+        args = RUN.issue_call(self.source, "summary")
+        self.assertEqual((args["model"], args["reasoning_effort"]), ("gpt-6-luna", "low"))
+        self.assertIn("Simplified Chinese", args["message"])
+        self.assertLess(args["message"].index("# Output language"), args["message"].index("# Per-item input"))
+        saved = (self.run / "protocol" / "summary-template.md").read_text()
+        self.assertIn("# Output language", saved)
+
+    def test_claude_effort_is_recorded_only_when_chosen(self):
+        other = self.root / "other.jsonl"
+        other.write_bytes(self.original)
+        RUN.prepare(other, host="claude", model="sonnet", effort="medium", language="en")
+        args = RUN.issue_call(other, "summary")
+        self.assertEqual((args["model"], args["reasoning_effort"]), ("sonnet", "medium"))
+        self.assertIn("Write every human-readable value in English", args["prompt"])
+        self.assertNotIn("reasoning_effort", RUN.call_arguments("summary", self.source, config=RUN.host_settings("claude")))
+
+    def test_invalid_worker_choices_and_unknown_language_are_rejected(self):
+        for kwargs, reason in (({"model": "bad model;rm"}, "invalid_worker_model"),
+                               ({"effort": "extreme"}, "invalid_worker_effort"),
+                               ({"language": "fr"}, "unsupported_language")):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(RUN.RunError, reason):
+                RUN.prepare(self.source, **kwargs)
+        self.assertFalse(self.run.exists())
+
+    def test_language_keeps_the_per_item_input_last_and_leaves_default_templates_alone(self):
+        for stage in RUN.STAGES:
+            default = RUN.fixed_template(stage)
+            self.assertNotIn(b"# Output language", default)
+            chosen = RUN.fixed_template(stage, language="zh")
+            self.assertTrue(chosen.endswith(b"# Per-item input (JSON data)\n"))
+            self.assertEqual(chosen.count(b"# Output language"), 1)
+
+    def test_orchestrate_reports_each_stage(self):
+        events = []
+        async def dispatch(arguments):
+            stage = arguments["task_name"].split("_")[1]
+            if stage == "summary":
+                self.write_summary()
+            elif stage == "insight":
+                (self.run / "insight" / "insight.md").write_text(INSIGHTS)
+            elif stage == "humanize":
+                (self.run / "humanize" / "insight.md").write_text((self.run / "insight/insight.md").read_text())
+            else:
+                self.write_redaction()
+            return "worker-" + stage
+        async def wait(worker_id):
+            return {"status": "complete"}
+        import asyncio
+        asyncio.run(RUN.orchestrate(self.source, dispatch, wait, progress=lambda s, e: events.append((s, e))))
+        self.assertEqual(events, [(stage, event) for stage in RUN.STAGES for event in ("started", "complete")])
 
     def test_host_flag_only_applies_when_preparing(self):
         with patch("sys.stdout"):
