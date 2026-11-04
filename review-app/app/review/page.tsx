@@ -1,0 +1,2247 @@
+'use client';
+
+import Link from 'next/link';
+import {
+  type SyntheticEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import {
+  AlertTriangle,
+  Check,
+  Columns2,
+  Download,
+  FilePlus2,
+  FileText,
+  History,
+  Lightbulb,
+  List,
+  LogOut,
+  PencilLine,
+  Plus,
+  Rows3,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Textarea } from '@/components/ui/textarea';
+import { RichSummary } from '@/components/rich-summary';
+import { ReviewGuide } from '@/components/review-guide';
+import { ReviewInfo } from '@/components/review-info';
+import { ReviewTools } from '@/components/review-tools';
+import { ReviewChanges } from '@/components/review-changes';
+import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
+import { ImportReview } from '@/components/import-review';
+import { InsightCard, insightStatusLabel } from '@/components/insight-card';
+import { AgentComposer } from '@/components/agent-composer';
+import { ReviewQueue } from '@/components/review-queue';
+import { TrajectoryPanel } from '@/components/trajectory-panel';
+import { ExportLabelingWarning } from '@/components/export-labeling-warning';
+import { exportLabelingSummary } from '@/lib/export-labeling';
+import {
+  defaultReviewSelection,
+  groupTrajectories,
+  reviewContentLabel,
+  trajectoryIdentity,
+  visibleReviews,
+} from '@/lib/trajectory-list';
+import {
+  reviewerInsightExample,
+  reviewerInsightPromptPath,
+  parseReviewerInsight,
+  reviewerInsightDraft,
+} from '@/lib/reviewer-insight';
+import { applyCards, type AgentResult } from '@/lib/agent-prompt';
+import { reviewLabels } from '@/lib/review-label';
+import {
+  readView,
+  serverView,
+  setView,
+  subscribeView,
+} from '@/lib/view-preference';
+import {
+  neighbour,
+  nextUndecided,
+  queueSummary,
+  type QueuePosition,
+} from '@/lib/review-queue';
+import {
+  insightKeysForProtocol,
+  insightTypesForProtocol,
+  isSkillCandidateProtocol,
+  hasWorkflowField,
+  type Insight,
+  type InsightStatus,
+  type Review,
+  type SummaryLine,
+} from '@/lib/review-types';
+import { cn } from '@/lib/utils';
+import { Autosave, SaveConflictError } from '@/lib/autosave';
+import {
+  ReviewRevisionClient,
+  type PendingReviewSave,
+} from '@/lib/review-save';
+import {
+  classifySummaryLines,
+  relabelSummaryLines,
+  remapInsightEvidence,
+  summaryMarkdown,
+} from '@/lib/v5-format';
+
+type ItemKind = 'trajectory' | 'group' | 'summary' | 'insight';
+type EditorTarget = {
+  kind: ItemKind;
+  id: string;
+  mode: 'add' | 'edit';
+} | null;
+type DeleteTarget = { kind: 'summary' | 'insight'; id: string } | null;
+
+function nextItemId(ids: string[], prefix: 'L' | 'I') {
+  const highest = ids.reduce((maximum, id) => {
+    const value = Number(id.slice(1));
+    return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+  }, 0);
+  return `${prefix}${String(highest + 1).padStart(3, '0')}`;
+}
+
+function reviewIsCompletable(review: Review) {
+  if (review.format !== 'v5') return true;
+  return (
+    (review.reviewLevel === 'global' ||
+      (review.privacyStatus === 'redacted' &&
+        review.provenance.hashVerified)) &&
+    review.insights.every(
+      (insight) =>
+        insight.status === 'accepted' || insight.status === 'rejected',
+    )
+  );
+}
+
+export default function Home() {
+  const [authState, setAuthState] = useState<
+    'checking' | 'signed_out' | 'signed_in'
+  >('checking');
+  const [username, setUsername] = useState('Oxygen');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginPending, setLoginPending] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewsLoaded, setReviewsLoaded] = useState(false);
+  const [requestedReviewMissing, setRequestedReviewMissing] = useState(false);
+  const [activeId, setActiveId] = useState('');
+  const [selectedInsight, setSelectedInsight] = useState('');
+  const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [draftText, setDraftText] = useState('');
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftType, setDraftType] = useState('');
+  const [draftAppliesWhen, setDraftAppliesWhen] = useState('');
+  const [draftScope, setDraftScope] = useState('');
+  const [draftTakeaway, setDraftTakeaway] = useState('');
+  const [draftDescription, setDraftDescription] = useState('');
+  const [draftWorkflow, setDraftWorkflow] = useState('');
+  const [draftExample, setDraftExample] = useState('');
+  const [draftWhy, setDraftWhy] = useState('');
+  const [draftEvidence, setDraftEvidence] = useState('');
+  const [changeNote, setChangeNote] = useState('');
+  const [editorError, setEditorError] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [saveState, setSaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [saveError, setSaveError] = useState('');
+  const [saveConflict, setSaveConflict] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [promptFeedback, setPromptFeedback] = useState('');
+  const [batchExportOpen, setBatchExportOpen] = useState(false);
+  const [exportIds, setExportIds] = useState<string[]>([]);
+  const [exportWarningOpen, setExportWarningOpen] = useState(false);
+  const [exportWithHistory, setExportWithHistory] = useState(false);
+
+  const navigationReviews = visibleReviews(reviews, activeId);
+  const active =
+    navigationReviews.find((review) => review.id === activeId) ??
+    navigationReviews[0];
+  const activeRef = useRef(active);
+  const editorRef = useRef(editorTarget);
+  const [revisionClient] = useState(() => new ReviewRevisionClient());
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  useEffect(() => {
+    editorRef.current = editorTarget;
+  }, [editorTarget]);
+  const [autosave] = useState(
+    () =>
+      new Autosave<PendingReviewSave>(
+        async (pending) => {
+          const snapshot = pending.review;
+          const { review, savedVersion } = await revisionClient.save(pending);
+          // A response from an earlier edit must never overwrite newer local edits.
+          setReviews((current) =>
+            current.map((item) =>
+              item.id !== review.id
+                ? item
+                : item.insights === snapshot.insights &&
+                    item.summaryLines === snapshot.summaryLines &&
+                    item.summaryGroups === snapshot.summaryGroups &&
+                    item.trajectorySummary === snapshot.trajectorySummary
+                  ? review
+                  : {
+                      ...item,
+                      revisionCount: review.revisionCount,
+                      version: savedVersion,
+                    },
+            ),
+          );
+        },
+        (state, error) => {
+          setDirty(state !== 'saved');
+          setSaveConflict(error instanceof SaveConflictError);
+          setSaveState(state === 'pending' ? 'idle' : state);
+          setSaveError(
+            error instanceof Error
+              ? error.message
+              : state === 'error'
+                ? 'Autosave failed.'
+                : '',
+          );
+        },
+      ),
+  );
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!autosave.hasPending && !editorRef.current) return;
+      event.preventDefault();
+    };
+    const flushOnHide = () => {
+      if (document.visibilityState === 'hidden') void autosave.flush();
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('visibilitychange', flushOnHide);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('visibilitychange', flushOnHide);
+    };
+  }, [autosave]);
+  const skillCandidates = isSkillCandidateProtocol(
+    active?.protocolVersion ?? 7,
+  );
+  const workflowField = hasWorkflowField(active?.protocolVersion ?? 7);
+  const insightTypes = insightTypesForProtocol(active?.protocolVersion ?? 7);
+  const labels = useMemo(() => reviewLabels(reviews), [reviews]);
+  const markdownEditor =
+    editorTarget?.kind === 'insight' &&
+    (editorTarget.mode === 'add' ||
+      active?.insights.find((item) => item.id === editorTarget.id)
+        ?.authorship === 'reviewer');
+  let preview: Insight | undefined;
+  let previewError = '';
+  if (markdownEditor && showPreview && active && editorTarget) {
+    try {
+      preview = parseReviewerInsight(
+        editorTarget.id,
+        draftText,
+        active.summaryLines,
+        active.protocolVersion,
+      );
+    } catch (error) {
+      previewError =
+        error instanceof Error ? error.message : 'Invalid insight Markdown.';
+    }
+  }
+  const selected =
+    active?.insights.find((insight) => insight.id === selectedInsight) ??
+    active?.insights[0];
+  const evidence = useMemo(() => new Set(selected?.evidence ?? []), [selected]);
+  const referencesToDelete =
+    deleteTarget?.kind === 'summary'
+      ? (active?.insights.filter((insight) =>
+          insight.evidence.includes(deleteTarget.id),
+        ).length ?? 0)
+      : 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unable to check session.');
+        return response.json() as Promise<{ authenticated: boolean }>;
+      })
+      .then(({ authenticated }) => {
+        if (!cancelled) {
+          setAuthState(authenticated ? 'signed_in' : 'signed_out');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoginError('Unable to check the login session.');
+          setAuthState('signed_out');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authState !== 'signed_in') return;
+    let cancelled = false;
+    fetch('/api/reviews', { cache: 'no-store' })
+      .then(async (response) => {
+        if (response.status === 401) {
+          setAuthState('signed_out');
+          throw new Error('Authentication required.');
+        }
+        if (!response.ok) throw new Error('Unable to load reviews.');
+        return response.json() as Promise<{ reviews: Review[] }>;
+      })
+      .then(({ reviews: loaded }) => {
+        if (cancelled) return;
+        const requestedId = new URLSearchParams(window.location.search).get(
+          'review',
+        );
+        if (
+          requestedId &&
+          !loaded.some((review) => review.id === requestedId)
+        ) {
+          setRequestedReviewMissing(true);
+          setReviews([]);
+          setReviewsLoaded(true);
+          return;
+        }
+        setRequestedReviewMissing(false);
+        loaded.forEach((review) => revisionClient.loaded(review));
+        setReviews(loaded);
+        setReviewsLoaded(true);
+        if (loaded.length) {
+          const requestedId = new URLSearchParams(window.location.search).get(
+            'review',
+          );
+          const requested = loaded.find((review) => review.id === requestedId);
+          const fallback = requested ?? visibleReviews(loaded)[0];
+          if (!fallback) return;
+          setActiveId((current) =>
+            loaded.some((review) => review.id === current)
+              ? current
+              : fallback.id,
+          );
+          const parameters = new URLSearchParams(window.location.search);
+          const run =
+            parameters.get('run') ??
+            trajectoryIdentity(fallback.sourcePath, fallback.id).run;
+          setExportIds(defaultReviewSelection(loaded, run));
+          if (
+            parameters.get('trajectories') === '1' &&
+            !parameters.has('changes')
+          ) {
+            setBatchExportOpen(true);
+          }
+          const requestedInsight = parameters.get('insight');
+          setSelectedInsight(
+            fallback.insights.find((insight) => insight.id === requestedInsight)
+              ?.id ??
+              fallback.insights[0]?.id ??
+              '',
+          );
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setReviewsLoaded(true);
+          setSaveError(
+            error instanceof Error ? error.message : 'Unable to load reviews.',
+          );
+          setSaveState('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authState, revisionClient]);
+
+  useEffect(() => {
+    if (!reviewsLoaded || !active) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('review', active.id);
+    if (selected?.id) url.searchParams.set('insight', selected.id);
+    else url.searchParams.delete('insight');
+    window.history.replaceState(null, '', url);
+  }, [reviewsLoaded, active, selected?.id]);
+
+  const viewMode = useSyncExternalStore(subscribeView, readView, serverView);
+  const chooseViewMode = setView;
+  const [cardsTab, setCardsTab] = useState<'insights' | 'summary'>('insights');
+
+  async function goToInsight(target: QueuePosition) {
+    setCardsTab('insights');
+    if (target.reviewId === activeRef.current?.id) {
+      setSelectedInsight(target.insightId);
+      return;
+    }
+    if (editorTarget || !(await autosave.flush())) return;
+    const review = reviews.find((item) => item.id === target.reviewId);
+    if (!review) return;
+    activateReview(review);
+    setSelectedInsight(target.insightId);
+  }
+
+  /** Record a decision, then move to the next card that still needs one. */
+  function decide(status: InsightStatus) {
+    if (!selected) return;
+    setInsightStatus(selected.id, status);
+    const updated = activeRef.current;
+    if (!updated) return;
+    const next = nextUndecided(
+      navigationReviews.map((item) =>
+        item.id === updated.id ? updated : item,
+      ),
+      { reviewId: updated.id, insightId: selected.id },
+    );
+    if (next) void goToInsight(next);
+  }
+
+  const agentUndo = useRef<{
+    reviewId: string;
+    previous: Insight[];
+    changed: string[];
+    added: string[];
+  } | null>(null);
+
+  /** Apply the agent's proposed cards; everything it touches is pending again. */
+  function applyAgentEdit(result: AgentResult, message: string) {
+    const current = activeRef.current;
+    if (!current) return { changed: [], added: [] };
+    const merged = applyCards(current.insights, result.cards);
+    if (!merged.changed.length && !merged.added.length) {
+      return { changed: [], added: [] };
+    }
+    agentUndo.current = {
+      reviewId: current.id,
+      previous: current.insights,
+      changed: merged.changed,
+      added: merged.added,
+    };
+    updateActive(
+      (review) => ({ ...review, insights: merged.insights }),
+      `Agent edit: ${message.slice(0, 200)}`,
+    );
+    setSelectedInsight(merged.changed[0] ?? merged.added[0]);
+    return { changed: merged.changed, added: merged.added };
+  }
+
+  function undoAgentEdit() {
+    const undo = agentUndo.current;
+    const current = activeRef.current;
+    if (!undo || !current || current.id !== undo.reviewId) return;
+    agentUndo.current = null;
+    const trailing =
+      undo.added.length > 0 &&
+      current.insights
+        .slice(-undo.added.length)
+        .every((insight, index) => insight.id === undo.added[index]);
+    updateActive(
+      (review) => ({
+        ...review,
+        insights: (trailing
+          ? review.insights.slice(0, -undo.added.length)
+          : review.insights
+        ).map(
+          (insight) =>
+            (undo.changed.includes(insight.id) &&
+              undo.previous.find((item) => item.id === insight.id)) ||
+            insight,
+        ),
+      }),
+      'Undid agent edit',
+    );
+  }
+
+  function step(direction: 1 | -1) {
+    if (!active || !selected) return;
+    const target = neighbour(
+      navigationReviews,
+      { reviewId: active.id, insightId: selected.id },
+      direction,
+    );
+    if (target) void goToInsight(target);
+  }
+
+  function openEvidence(lineId: string) {
+    if (!selected) return;
+    setCardsTab('summary');
+    window.setTimeout(() => jumpToEvidence(selected.id, lineId), 120);
+  }
+
+  const keyHandler = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    keyHandler.current = (event) => {
+      if (
+        viewMode !== 'cards' ||
+        cardsTab !== 'insights' ||
+        authState !== 'signed_in' ||
+        !selected
+      )
+        return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        editorTarget ||
+        deleteTarget ||
+        batchExportOpen ||
+        exportWarningOpen ||
+        reconcileOpen
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"]',
+        )
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === 'a') decide('accepted');
+      else if (key === 'd') decide('rejected');
+      else if (key === 'e') openEditor('insight', selected.id);
+      else if (key === 'j' || key === 'arrowright') step(1);
+      else if (key === 'k' || key === 'arrowleft') step(-1);
+      else return;
+      event.preventDefault();
+    };
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  async function handleLogin(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginPending(true);
+    setLoginError('');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(result?.error || 'Unable to sign in.');
+      }
+      setPassword('');
+      setAuthState('signed_in');
+    } catch (error) {
+      setLoginError(
+        error instanceof Error ? error.message : 'Unable to sign in.',
+      );
+    } finally {
+      setLoginPending(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (!(await autosave.flush())) return;
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+    setReviews([]);
+    setExportIds([]);
+    setReviewsLoaded(false);
+    setActiveId('');
+    setSelectedInsight('');
+    setPassword('');
+    setAuthState('signed_out');
+  }
+
+  async function chooseReview(id: string) {
+    if (editorTarget || !(await autosave.flush())) return;
+    const review = reviews.find((item) => item.id === id);
+    if (!review) return;
+    activateReview(review);
+  }
+
+  function openImportedReview(review: Review) {
+    revisionClient.loaded(review);
+    setReviews((current) => [review, ...current]);
+    activateReview(review);
+  }
+
+  function activateReview(review: Review) {
+    setCardsTab('insights');
+    setActiveId(review.id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('review', review.id);
+    url.searchParams.delete('changes');
+    window.history.replaceState(null, '', url);
+    setSelectedInsight(review.insights[0]?.id ?? '');
+    setDirty(false);
+    setSaveState('idle');
+    setSaveError('');
+  }
+
+  function updateActive(transform: (review: Review) => Review, note: string) {
+    const current = activeRef.current;
+    if (!current) return;
+    const next = transform(current);
+    activeRef.current = next;
+    setReviews((items) =>
+      items.map((item) => (item.id === next.id ? next : item)),
+    );
+    autosave.enqueue({
+      review: next,
+      note,
+      status: 'in_review',
+      requestId: crypto.randomUUID(),
+    });
+  }
+
+  function downloadUnsavedDraft() {
+    const draft = activeRef.current;
+    if (!draft) return;
+    const contents = JSON.stringify(
+      {
+        reviewId: draft.id,
+        expectedVersion: revisionClient.versionFor(draft),
+        trajectorySummary: draft.trajectorySummary,
+        summaryGroups: draft.summaryGroups,
+        summaryLines: draft.summaryLines,
+        insights: draft.insights,
+        status: draft.status,
+      },
+      (key, value: unknown) => (key === 'originalText' ? undefined : value),
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([contents], { type: 'application/json' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${draft.id}-unsaved-draft.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function loadSavedForReconciliation() {
+    if (!activeRef.current) return;
+    try {
+      const response = await fetch(
+        `/api/reviews/${activeRef.current.id}/revisions`,
+        { cache: 'no-store' },
+      );
+      if (!response.ok)
+        throw new Error(
+          'Unable to load the saved review. Your draft is retained.',
+        );
+      const { review } = (await response.json()) as { review: Review };
+      autosave.discardAfterReconciliation();
+      revisionClient.loaded(review);
+      activeRef.current = review;
+      setReviews((current) =>
+        current.map((item) => (item.id === review.id ? review : item)),
+      );
+      setSaveError('');
+      setSaveConflict(false);
+      setReconcileOpen(false);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Unable to load saved review.',
+      );
+    }
+  }
+
+  function resetDraft() {
+    setDraftText('');
+    setDraftTitle('');
+    setDraftType('');
+    setDraftAppliesWhen('');
+    setDraftScope('');
+    setDraftTakeaway('');
+    setDraftDescription('');
+    setDraftWorkflow('');
+    setDraftExample('');
+    setDraftWhy('');
+    setDraftEvidence('');
+    setChangeNote('');
+    setEditorError('');
+    setShowPreview(false);
+    setPromptFeedback('');
+  }
+
+  function openEditor(kind: ItemKind, id: string) {
+    if (!active) return;
+    resetDraft();
+    if (kind === 'trajectory') {
+      setDraftText(active.trajectorySummary.text);
+    } else if (kind === 'group') {
+      const group = active.summaryGroups.find((item) => item.id === id);
+      if (!group) return;
+      setDraftText(group.text);
+    } else if (kind === 'summary') {
+      const line = active.summaryLines.find((item) => item.id === id);
+      if (!line) return;
+      setDraftText(line.text);
+    } else {
+      setSelectedInsight(id);
+      const insight = active.insights.find((item) => item.id === id);
+      if (!insight) return;
+      setDraftText(
+        insight.authorship === 'reviewer'
+          ? reviewerInsightDraft(insight, active.protocolVersion)
+          : insight.text,
+      );
+      setDraftTitle(insight.title);
+      setDraftType(insight.type ?? insightTypes[0]);
+      setDraftAppliesWhen(insight.appliesWhen ?? '');
+      setDraftScope(insight.scope ?? '');
+      setDraftTakeaway(insight.takeaway ?? '');
+      setDraftDescription(insight.description ?? '');
+      setDraftWorkflow(insight.workflow ?? '');
+      setDraftExample(insight.example ?? '');
+      setDraftWhy(insight.why ?? '');
+      setDraftEvidence(insight.evidence.join(', '));
+    }
+    setEditorTarget({ kind, id, mode: 'edit' });
+  }
+
+  function openCreate(kind: 'summary' | 'insight') {
+    if (!active) return;
+    resetDraft();
+    const id =
+      kind === 'summary'
+        ? nextItemId(
+            active.summaryLines.map((line) => line.id),
+            'L',
+          )
+        : nextItemId(
+            active.insights.map((insight) => insight.id),
+            'I',
+          );
+    setEditorTarget({ kind, id, mode: 'add' });
+  }
+
+  function parsedEvidence() {
+    if (!active) return [];
+    const allowedLines = new Set(
+      active.summaryLines
+        .filter((line) => active.format !== 'v5' || line.kind === 'content')
+        .map((line) => line.id),
+    );
+    const requested = draftEvidence
+      .split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter(Boolean);
+    if (
+      new Set(requested).size !== requested.length ||
+      requested.some((value) => !allowedLines.has(value))
+    ) {
+      throw new Error(
+        'Evidence must contain unique, substantive Summary line IDs.',
+      );
+    }
+    return requested;
+  }
+
+  function applyEditor() {
+    if (!active || !editorTarget) return;
+    setEditorError('');
+    const action = editorTarget.mode === 'add' ? 'Added' : 'Edited';
+    const note = changeNote.trim() || `${action} ${editorTarget.id}`;
+
+    if (markdownEditor) {
+      try {
+        const card = parseReviewerInsight(
+          editorTarget.id,
+          draftText,
+          active.summaryLines,
+          active.protocolVersion,
+        );
+        updateActive(
+          (review) => ({
+            ...review,
+            insights:
+              editorTarget.mode === 'add'
+                ? [
+                    ...review.insights,
+                    { ...card, sourceId: crypto.randomUUID() },
+                  ]
+                : review.insights.map((item) =>
+                    item.id === card.id
+                      ? {
+                          ...card,
+                          sourceId: item.sourceId,
+                          originalText: item.originalText,
+                        }
+                      : item,
+                  ),
+          }),
+          note,
+        );
+        setSelectedInsight(card.id);
+        setEditorTarget(null);
+      } catch (error) {
+        setEditorError(
+          error instanceof Error ? error.message : 'Invalid insight Markdown.',
+        );
+      }
+      return;
+    }
+
+    if (
+      editorTarget.kind !== 'insight' &&
+      (!draftText.trim() || /[\r\n]/.test(draftText))
+    ) {
+      setEditorError('A Summary line must contain one physical line.');
+      return;
+    }
+
+    if (
+      editorTarget.kind === 'insight' &&
+      skillCandidates &&
+      (!draftTitle.trim() ||
+        !insightTypes.includes(draftType) ||
+        !draftDescription.trim() ||
+        (workflowField && !draftWorkflow.trim()) ||
+        !draftExample.trim())
+    ) {
+      setEditorError(
+        `Include a Title, origin Type, Description, ${workflowField ? 'Workflow, ' : ''}and Example.`,
+      );
+      return;
+    }
+    let nextEvidence: string[] = [];
+    if (editorTarget.kind === 'insight') {
+      try {
+        nextEvidence = parsedEvidence();
+      } catch (error) {
+        setEditorError(
+          error instanceof Error ? error.message : 'Invalid Evidence.',
+        );
+        return;
+      }
+      if (active.format === 'v5' && !draftTitle.trim()) {
+        setEditorError('Insight title is required for review.');
+        return;
+      }
+      if (active.format !== 'v5' && !draftText.trim()) {
+        setEditorError('Insight text is required.');
+        return;
+      }
+    }
+
+    updateActive((review) => {
+      if (editorTarget.kind === 'trajectory') {
+        return {
+          ...review,
+          trajectorySummary: {
+            ...review.trajectorySummary,
+            text: draftText.trim(),
+          },
+        };
+      }
+      if (editorTarget.kind === 'group') {
+        return {
+          ...review,
+          summaryGroups: review.summaryGroups.map((group) =>
+            group.id === editorTarget.id
+              ? { ...group, text: draftText.trim() }
+              : group,
+          ),
+        };
+      }
+      if (editorTarget.kind === 'summary') {
+        if (editorTarget.mode === 'add') {
+          const parsed = classifySummaryLines(`${draftText}\n`)[0];
+          const existingLines =
+            review.format === 'v5'
+              ? review.summaryLines.map((line, index, lines) =>
+                  index === lines.length - 1 && line.ending === ''
+                    ? { ...line, ending: '\n' as const }
+                    : line,
+                )
+              : review.summaryLines;
+          return {
+            ...review,
+            summaryGroups:
+              review.format === 'legacy'
+                ? review.summaryGroups.map((group, index, groups) =>
+                    index === groups.length - 1
+                      ? {
+                          ...group,
+                          lineIds: [...group.lineIds, editorTarget.id],
+                        }
+                      : group,
+                  )
+                : review.summaryGroups,
+            summaryLines: [
+              ...existingLines,
+              {
+                ...parsed,
+                id: editorTarget.id,
+                sourceId: undefined,
+                originalText: '',
+              },
+            ],
+          };
+        }
+        const cited = review.insights.some((insight) =>
+          insight.evidence.includes(editorTarget.id),
+        );
+        const parsed = classifySummaryLines(`${draftText}\n`)[0];
+        return {
+          ...review,
+          summaryLines: review.summaryLines.map((line) =>
+            line.id === editorTarget.id
+              ? {
+                  ...line,
+                  text: draftText,
+                  kind: parsed.kind,
+                }
+              : line,
+          ),
+          insights: cited
+            ? review.insights.map((insight) =>
+                insight.evidence.includes(editorTarget.id) &&
+                insight.status !== 'rejected'
+                  ? { ...insight, status: 'needs_review' }
+                  : insight,
+              )
+            : review.insights,
+        };
+      }
+
+      const fields = {
+        appliesWhen: draftAppliesWhen.trim(),
+        scope: draftScope.trim(),
+        takeaway: draftTakeaway.trim(),
+        description: draftDescription.trim(),
+        workflow: draftWorkflow.trim(),
+        example: draftExample.trim(),
+        why: draftWhy.trim(),
+      };
+      const presentKeys = insightKeysForProtocol(review.protocolVersion).filter(
+        (key) => {
+          if (key === 'title') return Boolean(draftTitle.trim());
+          if (key === 'type') return Boolean(draftType.trim());
+          if (key === 'scope') return Boolean(fields.scope);
+          if (key === 'takeaway') return Boolean(fields.takeaway);
+          if (key === 'description') return Boolean(fields.description);
+          if (key === 'workflow') return Boolean(fields.workflow);
+          if (key === 'example') return Boolean(fields.example);
+          return (
+            isSkillCandidateProtocol(review.protocolVersion) ||
+            nextEvidence.length > 0
+          );
+        },
+      );
+      const value: Insight = {
+        id: editorTarget.id,
+        sourceId: undefined,
+        title: draftTitle.trim() || 'Untitled insight',
+        presentKeys: review.format === 'v5' ? presentKeys : undefined,
+        type:
+          review.format === 'v5' ? draftType.trim() || undefined : undefined,
+        appliesWhen:
+          review.format === 'v5' ? fields.appliesWhen || undefined : undefined,
+        scope: review.format === 'v5' ? fields.scope || undefined : undefined,
+        takeaway:
+          review.format === 'v5' ? fields.takeaway || undefined : undefined,
+        why: review.format === 'v5' ? fields.why || undefined : undefined,
+        description: isSkillCandidateProtocol(review.protocolVersion)
+          ? fields.description
+          : undefined,
+        workflow: hasWorkflowField(review.protocolVersion)
+          ? fields.workflow
+          : undefined,
+        example: isSkillCandidateProtocol(review.protocolVersion)
+          ? fields.example
+          : undefined,
+        originalText: '',
+        text: draftText.trim(),
+        evidence: nextEvidence,
+        status: nextEvidence.length ? 'pending' : 'needs_review',
+      };
+      if (editorTarget.mode === 'add') {
+        return { ...review, insights: [...review.insights, value] };
+      }
+      return {
+        ...review,
+        insights: review.insights.map((insight) =>
+          insight.id === editorTarget.id
+            ? {
+                ...value,
+                sourceId: insight.sourceId,
+                authorship: insight.authorship,
+                originalText: insight.originalText,
+              }
+            : insight,
+        ),
+      };
+    }, note);
+
+    if (editorTarget.kind === 'insight') {
+      setSelectedInsight(editorTarget.id);
+    }
+    setEditorTarget(null);
+  }
+
+  function confirmDelete() {
+    if (!active || !deleteTarget) return;
+    const target = deleteTarget;
+    updateActive((review) => {
+      if (target.kind === 'summary') {
+        if (review.format === 'v5') {
+          const remaining = review.summaryLines.filter(
+            (line) => line.id !== target.id,
+          );
+          const relabeled = relabelSummaryLines(remaining);
+          return {
+            ...review,
+            summaryLines: relabeled.lines,
+            insights: remapInsightEvidence(
+              review.insights,
+              relabeled.idMap,
+              new Set([target.id]),
+            ),
+          };
+        }
+        return {
+          ...review,
+          summaryGroups: review.summaryGroups
+            .map((group) => ({
+              ...group,
+              lineIds: group.lineIds.filter((id) => id !== target.id),
+            }))
+            .filter((group) => group.lineIds.length),
+          summaryLines: review.summaryLines.filter(
+            (line) => line.id !== target.id,
+          ),
+          insights: review.insights.map((insight) => ({
+            ...insight,
+            evidence: insight.evidence.filter((id) => id !== target.id),
+          })),
+        };
+      }
+      const insights = review.insights
+        .filter((insight) => insight.id !== target.id)
+        .map((insight, index) =>
+          review.format === 'v5'
+            ? {
+                ...insight,
+                sourceId: insight.sourceId ?? insight.id,
+                id: `I${String(index + 1).padStart(3, '0')}`,
+              }
+            : insight,
+        );
+      if (selectedInsight === target.id) {
+        setSelectedInsight(insights[0]?.id ?? '');
+      }
+      return { ...review, insights };
+    }, `Removed ${target.id}`);
+    setDeleteTarget(null);
+  }
+
+  function setInsightStatus(id: string, status: InsightStatus) {
+    setSelectedInsight(id);
+    updateActive(
+      (review) => ({
+        ...review,
+        insights: review.insights.map((insight) =>
+          insight.id === id ? { ...insight, status } : insight,
+        ),
+      }),
+      `${insightStatusLabel(status)} ${id}`,
+    );
+  }
+
+  function jumpToEvidence(insightId: string, lineId: string) {
+    setSelectedInsight(insightId);
+    window.setTimeout(() => {
+      const target =
+        document.querySelector<HTMLElement>(
+          `[data-summary-lines~="${lineId}"]`,
+        ) ?? document.getElementById(lineId);
+      target?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 0);
+  }
+
+  async function openBatchExport() {
+    if (editorTarget || !(await autosave.flush())) return;
+    setBatchExportOpen(true);
+  }
+
+  async function exportActiveReview(includeHistory: boolean) {
+    if (!active || !(await autosave.flush())) return;
+    setExportWithHistory(includeHistory);
+    if (exportLabelingSummary([active]).incompleteReviews > 0)
+      setExportWarningOpen(true);
+    else await downloadActiveReview(includeHistory);
+  }
+
+  async function downloadActiveReview(includeHistory = exportWithHistory) {
+    if (!active || editorTarget !== null || !(await autosave.flush())) return;
+    const link = document.createElement('a');
+    link.href = `/api/reviews/${active.id}/export${includeHistory ? '?history=1' : ''}`;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  async function persist(status: Review['status']) {
+    if (!activeRef.current) return;
+    autosave.enqueue({
+      review: activeRef.current,
+      note:
+        status === 'completed'
+          ? 'Human review completed.'
+          : 'Review autosaved.',
+      status,
+      requestId: crypto.randomUUID(),
+    });
+    await autosave.flush();
+  }
+
+  if (authState === 'checking') {
+    return <CenteredMessage label="Checking access…" />;
+  }
+
+  if (authState === 'signed_in' && requestedReviewMissing) {
+    return (
+      <CenteredMessage label="This review is no longer available. Open the current review link." />
+    );
+  }
+
+  if (authState === 'signed_out') {
+    return (
+      <main className="grid min-h-screen place-items-center bg-background px-6 py-12 text-foreground">
+        <section className="w-full max-w-sm rounded-lg border bg-card p-7 shadow-sm">
+          <span className="grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <Sparkles className="size-5" />
+          </span>
+          <h1 className="mt-6 text-2xl font-semibold">Oxygen Review</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Sign in to review generated Summary and Insight cards.
+          </p>
+          <form className="mt-7 space-y-4" onSubmit={handleLogin}>
+            <label className="block space-y-2" htmlFor="login-username">
+              <span className="text-xs font-medium text-muted-foreground">
+                Account
+              </span>
+              <Input
+                id="login-username"
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+              />
+            </label>
+            <label className="block space-y-2" htmlFor="login-password">
+              <span className="text-xs font-medium text-muted-foreground">
+                Password
+              </span>
+              <Input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            {loginError && (
+              <p role="alert" className="text-sm text-destructive">
+                {loginError}
+              </p>
+            )}
+            <Button className="w-full" type="submit" disabled={loginPending}>
+              {loginPending ? 'Signing in…' : 'Sign in'}
+            </Button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  if (!reviewsLoaded) return <CenteredMessage label="Loading reviews…" />;
+
+  if (!active) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-background px-6 text-foreground">
+        <div className="text-center">
+          <FilePlus2 className="mx-auto size-8 text-muted-foreground" />
+          <h1 className="mt-4 text-lg font-semibold">No reviews waiting</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Humanized or redacted insights and summaries will appear here after
+            import. Older extraction drafts remain available through their
+            review links.
+          </p>
+          {saveError && (
+            <p className="mt-3 text-sm text-destructive">{saveError}</p>
+          )}
+          <div className="mt-5 flex justify-center gap-2">
+            <ImportReview onImported={openImportedReview} />
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut data-icon="inline-start" />
+              Sign out
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const completable = reviewIsCompletable(active);
+  const unresolved = active.insights.filter(
+    (insight) => insight.status !== 'accepted' && insight.status !== 'rejected',
+  ).length;
+  const queue = queueSummary(navigationReviews);
+  const queuePosition: QueuePosition | null = selected
+    ? { reviewId: active.id, insightId: selected.id }
+    : null;
+  const globalEvidenceLabels =
+    active.reviewLevel === 'global'
+      ? Object.fromEntries(
+          active.summaryLines.map((line) => [
+            line.id,
+            line.sourceId ?? line.id,
+          ]),
+        )
+      : undefined;
+
+  const summaryBody = (
+    <>
+      {active.format === 'v5' ? (
+        <div className="mx-auto max-w-[760px] px-4 pt-6 pb-44 sm:px-12">
+          {active.summaryLines.length ? (
+            <RichSummary
+              markdown={summaryMarkdown(active.summaryLines)}
+              lines={active.summaryLines}
+              evidence={evidence}
+              onEdit={(lineId) => openEditor('summary', lineId)}
+              onDelete={(lineId) =>
+                setDeleteTarget({ kind: 'summary', id: lineId })
+              }
+            />
+          ) : (
+            <EmptyState
+              label="No Summary content retained"
+              onAdd={() => openCreate('summary')}
+            />
+          )}
+        </div>
+      ) : (
+        <LegacySummary
+          review={active}
+          evidence={evidence}
+          onEdit={openEditor}
+          onDelete={(id) => setDeleteTarget({ kind: 'summary', id })}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <main className="min-h-screen bg-background text-foreground lg:flex lg:h-dvh lg:min-h-0 lg:flex-col lg:overflow-hidden">
+      <TrajectoryPanel
+        reviews={reviews}
+        active={active}
+        open={batchExportOpen}
+        onOpenChange={setBatchExportOpen}
+        selectedIds={exportIds}
+        setSelectedIds={setExportIds}
+        onOpenReview={chooseReview}
+        unsaved={dirty || saveState === 'saving' || editorTarget !== null}
+      />
+      <AgentComposer
+        key={active.id}
+        protocolVersion={active.protocolVersion}
+        focusLabel={selected?.id}
+        disabled={editorTarget !== null}
+        getContext={() => {
+          const current = activeRef.current ?? active;
+          return {
+            protocolVersion: current.protocolVersion,
+            summaryLines: current.summaryLines.map(({ id, text, kind }) => ({
+              id,
+              text,
+              kind,
+            })),
+            insights: current.insights,
+            focusId: selected?.id,
+          };
+        }}
+        onEdit={applyAgentEdit}
+        onUndo={undoAgentEdit}
+      />
+      <ExportLabelingWarning
+        reviews={[active]}
+        open={exportWarningOpen}
+        onOpenChange={setExportWarningOpen}
+        onConfirm={downloadActiveReview}
+      />
+      <header className="shrink-0 border-b bg-background px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+            <Link
+              href="/"
+              className="grid size-6 shrink-0 place-items-center rounded-[4px] bg-foreground text-background"
+              title="Back to Oxygen home"
+              aria-label="Oxygen home"
+            >
+              <Sparkles className="size-3.5" />
+            </Link>
+            <select
+              aria-label="Choose review"
+              disabled={editorTarget !== null}
+              value={active.id}
+              onChange={(event) => chooseReview(event.target.value)}
+              title={labels.get(active.id)}
+              className="h-8 w-full min-w-0 max-w-lg flex-1 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {navigationReviews.map((review) => (
+                <option key={review.id} value={review.id}>
+                  {review.id === active.id && review.reviewLevel === 'global'
+                    ? review.projectName
+                    : labels.get(review.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <ReviewChanges
+              key={active.id}
+              reviewId={active.id}
+              version={active.version ?? active.revisionCount}
+            />
+            <fieldset
+              aria-label="Review layout"
+              className="m-0 flex min-w-0 items-center rounded-[4px] border p-0.5"
+            >
+              <Button
+                size="icon-sm"
+                variant={viewMode === 'cards' ? 'secondary' : 'ghost'}
+                aria-label="One card at a time"
+                aria-pressed={viewMode === 'cards'}
+                title="One card at a time"
+                onClick={() => chooseViewMode('cards')}
+              >
+                <Rows3 />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant={viewMode === 'split' ? 'secondary' : 'ghost'}
+                aria-label="Summary and cards side by side"
+                aria-pressed={viewMode === 'split'}
+                title="Summary and cards side by side"
+                onClick={() => chooseViewMode('split')}
+              >
+                <Columns2 />
+              </Button>
+            </fieldset>
+            <div className="flex items-center gap-2">
+              <output
+                aria-label="Review progress"
+                className="text-xs text-muted-foreground"
+              >
+                {active.insights.length - unresolved}/{active.insights.length}{' '}
+                reviewed
+              </output>
+              <Button
+                disabled={
+                  saveState === 'saving' ||
+                  editorTarget !== null ||
+                  !completable
+                }
+                title={
+                  editorTarget !== null
+                    ? 'Apply or cancel your edit before completing'
+                    : completable
+                      ? 'Complete review'
+                      : active.reviewLevel === 'global'
+                        ? 'Resolve every global insight before completing'
+                        : 'Complete a redacted review after resolving every Insight'
+                }
+                onClick={() => persist('completed')}
+              >
+                <Check data-icon="inline-start" />
+                Complete
+              </Button>
+            </div>
+            <ReviewTools>
+              <ImportReview
+                disabled={
+                  dirty || saveState === 'saving' || editorTarget !== null
+                }
+                onImported={openImportedReview}
+              />
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                title={
+                  editorTarget
+                    ? 'Apply or cancel your edit before exporting'
+                    : 'Save pending changes automatically and export'
+                }
+                aria-label="Export reviewed artifacts"
+                onClick={() => exportActiveReview(false)}
+              >
+                <Download data-icon="inline-start" />
+                Export
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                title="Private download: reviewed artifacts plus every saved version, request text, and diffs"
+                aria-label="Export reviewed artifacts with edit history"
+                onClick={() => exportActiveReview(true)}
+              >
+                <History data-icon="inline-start" />
+                Export with history
+              </Button>
+              <Button variant="ghost" onClick={openBatchExport}>
+                <List data-icon="inline-start" />
+                Trajectories ({groupTrajectories(reviews).length})
+              </Button>
+              <div className="my-1 border-t" />
+              <ReviewGuide review={active} showLabel />
+              <ReviewInfo review={active} showLabel />
+              <Button
+                variant="ghost"
+                disabled={editorTarget !== null}
+                onClick={handleLogout}
+              >
+                <LogOut data-icon="inline-start" />
+                Sign out
+              </Button>
+            </ReviewTools>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-9 text-xs text-muted-foreground">
+          {active.reviewLevel === 'global' && (
+            <span>
+              Based on {active.globalSources?.length ?? 0} reviewed trajectories
+            </span>
+          )}
+          {active.format === 'v5' && (
+            <span
+              className="inline-flex items-center gap-1"
+              title={
+                active.reviewLevel === 'global'
+                  ? 'Global review does not certify privacy'
+                  : undefined
+              }
+            >
+              {active.privacyStatus === 'redacted' ? (
+                <ShieldCheck className="size-3" />
+              ) : (
+                <AlertTriangle className="size-3" />
+              )}
+              {active.reviewLevel === 'global'
+                ? 'Private'
+                : reviewContentLabel(active)}
+            </span>
+          )}
+          {active.status === 'completed' && <span>Completed</span>}
+          <output
+            aria-label="Save status"
+            className={saveState === 'error' ? 'text-destructive' : ''}
+            title={saveError}
+          >
+            {saveState === 'saving'
+              ? 'Saving…'
+              : saveState === 'error'
+                ? saveError || 'Could not save'
+                : dirty
+                  ? 'Unsaved changes'
+                  : 'All changes saved'}
+          </output>
+          {saveState === 'error' && dirty && !saveConflict && (
+            <Button variant="outline" onClick={() => void autosave.flush()}>
+              Retry autosave
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {saveConflict && (
+        <div
+          role="alert"
+          className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"
+        >
+          <p className="min-w-48 flex-1">
+            The saved review changed in another session. Your unsaved draft is
+            still here. Download it before loading the latest saved version to
+            reconcile your changes.
+          </p>
+          <Button variant="outline" onClick={downloadUnsavedDraft}>
+            Download unsaved draft
+          </Button>
+          <Button
+            variant="outline"
+            disabled={editorTarget !== null}
+            onClick={() => setReconcileOpen(true)}
+          >
+            Load saved version
+          </Button>
+        </div>
+      )}
+
+      <AlertDialog open={reconcileOpen} onOpenChange={setReconcileOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Load the latest saved review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This replaces the unsaved draft shown here. Download the draft
+              first if you want to reconcile any of its changes with the saved
+              review.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep draft</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void loadSavedForReconciliation()}
+            >
+              Load saved version
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {viewMode === 'cards' ? (
+        <div className="flex min-h-0 flex-col bg-[color:var(--sidebar)] lg:flex-1">
+          <ReviewQueue
+            review={active}
+            insight={selected}
+            index={Math.max(
+              0,
+              active.insights.findIndex((item) => item.id === selected?.id),
+            )}
+            remaining={queue.undecided}
+            structured={
+              active.format === 'v5' || selected?.authorship === 'reviewer'
+            }
+            skillCandidate={skillCandidates}
+            evidenceLabels={globalEvidenceLabels}
+            hasPrevious={
+              !!queuePosition &&
+              neighbour(navigationReviews, queuePosition, -1) !== null
+            }
+            hasNext={
+              !!queuePosition &&
+              neighbour(navigationReviews, queuePosition, 1) !== null
+            }
+            completable={completable && saveState !== 'saving'}
+            disabled={editorTarget !== null}
+            onStatus={decide}
+            onEdit={() => selected && openEditor('insight', selected.id)}
+            onDelete={() =>
+              selected && setDeleteTarget({ kind: 'insight', id: selected.id })
+            }
+            onPrevious={() => step(-1)}
+            onNext={() => step(1)}
+            onOpenEvidence={openEvidence}
+            onComplete={() => persist('completed')}
+            tab={cardsTab}
+            onTabChange={setCardsTab}
+            summary={summaryBody}
+            summaryCount={active.summaryLines.length}
+          />
+        </div>
+      ) : (
+        <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
+          <section
+            className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
+            aria-labelledby="summary-heading"
+          >
+            <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
+              <div className="flex items-center gap-2">
+                <FileText className="size-4 text-muted-foreground" />
+                <h1 id="summary-heading" className="text-sm font-medium">
+                  {active.reviewLevel === 'global'
+                    ? 'Source summaries'
+                    : 'Summary'}
+                </h1>
+                <span className="text-sm text-muted-foreground">
+                  {active.summaryLines.length}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => openCreate('summary')}
+              >
+                <Plus data-icon="inline-start" />
+                Add line
+              </Button>
+            </div>
+            <ScrollArea className="h-[min(560px,60dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
+              {summaryBody}
+            </ScrollArea>
+          </section>
+
+          <section
+            className="flex min-h-0 min-w-0 flex-col bg-[color:var(--sidebar)]"
+            aria-labelledby="insights-heading"
+          >
+            <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
+              <div className="flex items-center gap-2">
+                <Lightbulb className="size-4 text-muted-foreground" />
+                <h2 id="insights-heading" className="text-sm font-medium">
+                  {active.reviewLevel === 'global'
+                    ? 'Global insight cards'
+                    : 'Insight cards'}
+                </h2>
+                <span className="text-sm text-muted-foreground">
+                  {active.insights.length}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => openCreate('insight')}
+              >
+                <Plus data-icon="inline-start" />
+                Add insight
+              </Button>
+            </div>
+            <ScrollArea className="h-[min(620px,65dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
+              {active.insights.length ? (
+                <div className="space-y-3 p-4 pb-44 sm:p-5 sm:pb-44">
+                  {active.insights.map((insight) => (
+                    <InsightCard
+                      key={insight.id}
+                      insight={insight}
+                      evidenceLabels={
+                        active.reviewLevel === 'global'
+                          ? Object.fromEntries(
+                              active.summaryLines.map((line) => [
+                                line.id,
+                                line.sourceId ?? line.id,
+                              ]),
+                            )
+                          : undefined
+                      }
+                      skillCandidate={skillCandidates}
+                      structured={
+                        active.format === 'v5' ||
+                        insight.authorship === 'reviewer'
+                      }
+                      selected={insight.id === selected?.id}
+                      onSelect={() => setSelectedInsight(insight.id)}
+                      onEvidence={(lineId) =>
+                        jumpToEvidence(insight.id, lineId)
+                      }
+                      onEdit={() => openEditor('insight', insight.id)}
+                      onDelete={() => {
+                        setSelectedInsight(insight.id);
+                        setDeleteTarget({ kind: 'insight', id: insight.id });
+                      }}
+                      onStatus={(status) =>
+                        setInsightStatus(insight.id, status)
+                      }
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  label="No supported Insights retained"
+                  onAdd={() => openCreate('insight')}
+                />
+              )}
+            </ScrollArea>
+          </section>
+        </div>
+      )}
+
+      <Sheet
+        open={Boolean(editorTarget)}
+        onOpenChange={(open) => {
+          if (!open) setEditorTarget(null);
+        }}
+      >
+        <SheetContent className="h-dvh max-h-dvh gap-0 overflow-hidden sm:max-w-xl">
+          <SheetHeader className="shrink-0 border-b px-6 py-5">
+            <SheetTitle>
+              {editorTarget?.mode === 'add' ? 'Add' : 'Edit'}{' '}
+              {editorTarget?.kind === 'trajectory'
+                ? 'Trajectory summary'
+                : editorTarget?.kind === 'group'
+                  ? `Summary group ${editorTarget.id}`
+                  : editorTarget?.kind === 'summary'
+                    ? `Summary line ${editorTarget.id}`
+                    : `Insight ${editorTarget?.id ?? ''}`}
+            </SheetTitle>
+            <SheetDescription>
+              Changes are saved in review history. Explicit privacy cleanup can
+              sanitize earlier versions.
+            </SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1 overscroll-contain">
+            <div className="space-y-5 p-6">
+              {markdownEditor && (
+                <div className="space-y-4">
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    Paste one{' '}
+                    {skillCandidates
+                      ? 'skill candidate using Title, Type, Description, Example'
+                      : 'insight using Title, Type, Scope, Takeaway'}
+                    , and optional Evidence. You can write it yourself or use
+                    the chatbot prompt with summary excerpts and your thoughts.
+                    No file upload is needed.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(
+                            reviewerInsightPromptPath(active.protocolVersion),
+                          );
+                          if (!response.ok)
+                            throw new Error('Unable to load prompt.');
+                          await navigator.clipboard.writeText(
+                            await response.text(),
+                          );
+                          setPromptFeedback(
+                            'Prompt copied. Paste it into your chatbot, then add your excerpts and thoughts.',
+                          );
+                        } catch {
+                          setPromptFeedback(
+                            'Could not copy automatically. Open the prompt link and copy its text.',
+                          );
+                        }
+                      }}
+                    >
+                      Copy chatbot prompt
+                    </Button>
+                    <a
+                      className="text-sm underline"
+                      href={reviewerInsightPromptPath(active.protocolVersion)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open prompt
+                    </a>
+                  </div>
+                  {promptFeedback && (
+                    <output className="block text-sm text-muted-foreground">
+                      {promptFeedback}
+                    </output>
+                  )}
+                  <Field label="Insight Markdown" htmlFor="insight-markdown">
+                    <Textarea
+                      id="insight-markdown"
+                      className="min-h-72 resize-y font-mono text-sm leading-6"
+                      value={draftText}
+                      onChange={(event) => setDraftText(event.target.value)}
+                      placeholder={reviewerInsightExample(
+                        active.protocolVersion,
+                      )}
+                    />
+                  </Field>
+                  <p className="text-xs text-muted-foreground">
+                    Evidence may be omitted or left blank for your own insight.
+                    If you include line IDs, they must refer to this
+                    review&apos;s Summary.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPreview((value) => !value)}
+                  >
+                    {showPreview ? 'Hide preview' : 'Preview card'}
+                  </Button>
+                  {showPreview && previewError && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {previewError}
+                    </p>
+                  )}
+                  {showPreview && preview && (
+                    <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+                      <h3 className="font-semibold">{preview.title}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {preview.type}
+                      </p>
+                      {skillCandidates ? (
+                        <>
+                          <strong>Description</strong>
+                          <InsightProse markdown={preview.description ?? ''} />
+                          {workflowField && (
+                            <>
+                              <strong>Workflow</strong>
+                              <InsightProse markdown={preview.workflow ?? ''} />
+                            </>
+                          )}
+                          <strong>Example</strong>
+                          <InsightProse markdown={preview.example ?? ''} />
+                        </>
+                      ) : (
+                        <>
+                          <InsightTakeaway markdown={preview.takeaway ?? ''} />
+                          <p className="text-sm text-muted-foreground">
+                            <strong>Scope:</strong> {preview.scope}
+                          </p>
+                        </>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Evidence:{' '}
+                        {preview.evidence.join(', ') ||
+                          'Not provided (optional)'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {editorTarget?.kind === 'insight' && !markdownEditor && (
+                <>
+                  <Field label="Title" htmlFor="insight-title">
+                    <Input
+                      id="insight-title"
+                      value={draftTitle}
+                      onChange={(event) => setDraftTitle(event.target.value)}
+                    />
+                  </Field>
+                  {active.format === 'v5' ? (
+                    <>
+                      <Field label="Type" htmlFor="insight-type">
+                        <select
+                          id="insight-type"
+                          value={draftType}
+                          onChange={(event) => setDraftType(event.target.value)}
+                          className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <option value="">Not specified</option>
+                          {!insightTypes.includes(
+                            draftType as (typeof insightTypes)[number],
+                          ) &&
+                            draftType && (
+                              <option value={draftType}>{draftType}</option>
+                            )}
+                          {insightTypes.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      {skillCandidates ? (
+                        <>
+                          <Field
+                            label="Description"
+                            htmlFor="insight-description"
+                          >
+                            <Textarea
+                              id="insight-description"
+                              className="min-h-24 resize-y"
+                              aria-describedby={
+                                workflowField
+                                  ? 'description-guidance'
+                                  : undefined
+                              }
+                              value={draftDescription}
+                              onChange={(event) =>
+                                setDraftDescription(event.target.value)
+                              }
+                            />
+                            {workflowField && (
+                              <span
+                                id="description-guidance"
+                                className="block text-xs text-muted-foreground"
+                              >
+                                Briefly explain the capability and when to use
+                                it.
+                              </span>
+                            )}
+                          </Field>
+                          {workflowField && (
+                            <Field label="Workflow" htmlFor="insight-workflow">
+                              <Textarea
+                                id="insight-workflow"
+                                className="min-h-32 resize-y"
+                                aria-describedby="workflow-guidance"
+                                value={draftWorkflow}
+                                onChange={(event) =>
+                                  setDraftWorkflow(event.target.value)
+                                }
+                              />
+                              <span
+                                id="workflow-guidance"
+                                className="block text-xs text-muted-foreground"
+                              >
+                                Describe reusable actions, decisions, and
+                                constraints beyond the original project.
+                              </span>
+                            </Field>
+                          )}
+                          <Field label="Example" htmlFor="insight-example">
+                            <Textarea
+                              id="insight-example"
+                              className="min-h-32 resize-y"
+                              aria-describedby={
+                                workflowField ? 'example-guidance' : undefined
+                              }
+                              value={draftExample}
+                              onChange={(event) =>
+                                setDraftExample(event.target.value)
+                              }
+                            />
+                            {workflowField && (
+                              <span
+                                id="example-guidance"
+                                className="block text-xs text-muted-foreground"
+                              >
+                                Show a recorded application through
+                                understandable tasks, choices, and results.
+                                Preserve what was reported, observed, attempted,
+                                or unresolved.
+                              </span>
+                            )}
+                          </Field>
+                        </>
+                      ) : (
+                        <>
+                          <Field label="Applies when" htmlFor="applies-when">
+                            <Textarea
+                              id="applies-when"
+                              className="min-h-20 resize-y"
+                              value={draftAppliesWhen}
+                              onChange={(event) =>
+                                setDraftAppliesWhen(event.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="Scope" htmlFor="insight-scope">
+                            <Textarea
+                              id="insight-scope"
+                              className="min-h-20 resize-y"
+                              value={draftScope}
+                              onChange={(event) =>
+                                setDraftScope(event.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="Takeaway" htmlFor="insight-takeaway">
+                            <Textarea
+                              id="insight-takeaway"
+                              className="min-h-24 resize-y"
+                              value={draftTakeaway}
+                              onChange={(event) =>
+                                setDraftTakeaway(event.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="Why" htmlFor="insight-why">
+                            <Textarea
+                              id="insight-why"
+                              className="min-h-24 resize-y"
+                              value={draftWhy}
+                              onChange={(event) =>
+                                setDraftWhy(event.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="Additional text" htmlFor="insight-text">
+                            <Textarea
+                              id="insight-text"
+                              className="min-h-24 resize-y"
+                              value={draftText}
+                              onChange={(event) =>
+                                setDraftText(event.target.value)
+                              }
+                            />
+                          </Field>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <Field label="Insight text" htmlFor="reviewed-text">
+                      <Textarea
+                        id="reviewed-text"
+                        className="min-h-40 resize-y text-base leading-7"
+                        value={draftText}
+                        onChange={(event) => setDraftText(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                  <Field label="Summary evidence" htmlFor="evidence-lines">
+                    <Input
+                      id="evidence-lines"
+                      className="font-mono"
+                      value={draftEvidence}
+                      onChange={(event) => setDraftEvidence(event.target.value)}
+                      placeholder="L009, L017"
+                    />
+                  </Field>
+                </>
+              )}
+
+              {editorTarget && editorTarget.kind !== 'insight' && (
+                <Field label="Summary text" htmlFor="reviewed-text">
+                  <Input
+                    id="reviewed-text"
+                    value={draftText}
+                    onChange={(event) => setDraftText(event.target.value)}
+                  />
+                </Field>
+              )}
+
+              {editorTarget?.mode === 'edit' && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Original generated text
+                  </p>
+                  <div className="max-h-40 overflow-auto rounded-md border bg-muted/40 p-4 text-sm leading-6 text-muted-foreground whitespace-pre-wrap">
+                    {editorTarget.kind === 'trajectory'
+                      ? active.trajectorySummary.originalText
+                      : editorTarget.kind === 'group'
+                        ? active.summaryGroups.find(
+                            (group) => group.id === editorTarget.id,
+                          )?.originalText || 'Added during review'
+                        : editorTarget.kind === 'summary'
+                          ? active.summaryLines.find(
+                              (line) => line.id === editorTarget.id,
+                            )?.originalText || 'Added during review'
+                          : active.insights.find(
+                              (insight) => insight.id === editorTarget.id,
+                            )?.originalText || 'Added during review'}
+                  </div>
+                </div>
+              )}
+
+              <Field label="Revision note" htmlFor="change-note">
+                <Textarea
+                  id="change-note"
+                  className="min-h-20 resize-y"
+                  value={changeNote}
+                  onChange={(event) => setChangeNote(event.target.value)}
+                />
+              </Field>
+              {editorError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {editorError}
+                </p>
+              )}
+            </div>
+          </ScrollArea>
+          <SheetFooter className="mt-0 shrink-0 border-t bg-muted/30 px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setEditorTarget(null)}>
+              Cancel
+            </Button>
+            <Button onClick={applyEditor}>
+              {editorTarget?.mode === 'add' ? 'Add item' : 'Apply edit'}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.kind === 'insight' ? 'Delete' : 'Remove'}{' '}
+              {deleteTarget?.id}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.kind === 'insight'
+                ? 'Delete this insight from the review. Use the cross to decline it and retain its record.'
+                : referencesToDelete > 0
+                  ? `This line is cited by ${referencesToDelete} Insight${referencesToDelete === 1 ? '' : 's'}. Those cards will require evidence review.`
+                  : 'The generated original remains preserved in review history.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              {deleteTarget?.kind === 'insight' ? 'Delete' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </main>
+  );
+}
+
+function LegacySummary({
+  review,
+  evidence,
+  onEdit,
+  onDelete,
+}: {
+  review: Review;
+  evidence: Set<string>;
+  onEdit: (kind: ItemKind, id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const renderLine = (line: SummaryLine) => (
+    <div
+      id={line.id}
+      key={line.id}
+      className={cn(
+        'grid grid-cols-[48px_minmax(0,1fr)_64px] gap-3 rounded-md px-3 py-3',
+        evidence.has(line.id) && 'bg-[color:var(--evidence-bg)]',
+      )}
+    >
+      <code className="pt-1 text-xs font-semibold text-muted-foreground">
+        {line.id}
+      </code>
+      <p className="text-[15px] leading-7">{line.text}</p>
+      <div className="flex gap-1">
+        <Button
+          aria-label={`Edit ${line.id}`}
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onEdit('summary', line.id)}
+        >
+          <PencilLine />
+        </Button>
+        <Button
+          aria-label={`Remove ${line.id}`}
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onDelete(line.id)}
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5 p-4 sm:p-6">
+      {review.trajectorySummary.text && (
+        <section className="border-b pb-5">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Trajectory summary</h2>
+            <Button
+              aria-label="Edit trajectory summary"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => onEdit('trajectory', 'trajectory')}
+            >
+              <PencilLine />
+            </Button>
+          </div>
+          <p className="mt-2 text-lg leading-8">
+            {review.trajectorySummary.text}
+          </p>
+        </section>
+      )}
+      {review.summaryGroups.length
+        ? review.summaryGroups.map((group) => (
+            <section key={group.id} className="rounded-lg border bg-card">
+              <div className="flex items-start gap-3 border-b p-4">
+                <code className="pt-1 text-xs font-bold text-muted-foreground">
+                  {group.id}
+                </code>
+                <p className="min-w-0 flex-1 leading-7">{group.text}</p>
+                <Button
+                  aria-label={`Edit ${group.id}`}
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onEdit('group', group.id)}
+                >
+                  <PencilLine />
+                </Button>
+              </div>
+              <div className="p-2">
+                {group.lineIds
+                  .map((id) =>
+                    review.summaryLines.find((line) => line.id === id),
+                  )
+                  .filter((line): line is SummaryLine => Boolean(line))
+                  .map(renderLine)}
+              </div>
+            </section>
+          ))
+        : review.summaryLines.map(renderLine)}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label htmlFor={htmlFor} className="block space-y-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function EmptyState({ label, onAdd }: { label: string; onAdd: () => void }) {
+  return (
+    <div className="grid min-h-72 place-items-center p-8 text-center">
+      <div>
+        <FilePlus2 className="mx-auto mb-3 size-7 text-muted-foreground" />
+        <p className="mb-4 text-sm text-muted-foreground">{label}</p>
+        <Button variant="outline" onClick={onAdd}>
+          <Plus data-icon="inline-start" />
+          Add one
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CenteredMessage({ label }: { label: string }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-background px-6 text-foreground">
+      <div className="text-center">
+        <span className="mx-auto grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
+          <Sparkles className="size-5" />
+        </span>
+        <p className="mt-4 text-sm text-muted-foreground">{label}</p>
+      </div>
+    </main>
+  );
+}

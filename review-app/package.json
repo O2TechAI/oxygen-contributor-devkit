@@ -6,8 +6,10 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "oxygen": "node scripts/oxygen.mjs",
     "dev": "vinext dev",
     "dev:node": "vite --config vite.node.config.ts",
+    "agent-bridge": "node --experimental-strip-types bridge/agent-bridge.ts",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "db:local:init": "wrangler d1 migrations apply site-creator-d1 --local --persist-to .wrangler/state --config wrangler.local.jsonc",

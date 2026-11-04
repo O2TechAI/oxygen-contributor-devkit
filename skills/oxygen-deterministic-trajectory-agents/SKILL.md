@@ -26,6 +26,14 @@ The worker host is chosen at initialization and saved in the run:
   `--model`), and `run_in_background=true`. Agent-tool workers start from a fresh
   context; reasoning effort comes from the worker definition and is not set per call.
 
+`prepare` also accepts `--model`, `--effort` and `--language en|zh`. The defaults above
+apply when they are omitted; a chosen value is saved in the run's manifest and used for
+every stage. `--language` freezes an output-language rule into every stage's prompt: the
+readable text follows it, while card headings, field names, Type values and line labels
+stay in English because the card parser and labeler depend on them. The local Oxygen app
+(`./oxygen`) uses these options and runs the workers as headless `codex exec` or
+`claude -p` processes through `orchestrate`.
+
 Check host support before dispatch and use the helper-generated arguments
 unchanged. Each stage gets a fresh worker. The generated prompt begins with host
 notes describing that host's file-reading tools and limits.

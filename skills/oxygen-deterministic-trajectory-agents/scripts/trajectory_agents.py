@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import tempfile
@@ -20,6 +21,32 @@ EFFORT = "high"
 HOSTS = ("codex", "claude")
 CLAUDE_MODEL = "opus"
 CLAUDE_SUBAGENT = "general-purpose"
+# A contributor may choose the worker model and effort; the choice is saved in the run.
+MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+# Output language of the human-readable text. Structure always stays English because
+# the card parser and the labeler depend on it.
+LANGUAGES = {
+    "en": "English",
+    "zh": "Simplified Chinese (简体中文)",
+}
+LANGUAGE_RULES = {
+    "en": (
+        "Write every human-readable value in English: the summary prose and each "
+        "card's Title, Description, Workflow and Example. Quoted source text keeps "
+        "its original language."
+    ),
+    "zh": (
+        "Write every human-readable value in Simplified Chinese (简体中文): the "
+        "summary prose and each card's Title, Description, Workflow and Example. "
+        "Keep technical terms, product and API names, code identifiers, file paths, "
+        "commands, error messages and quoted source text in their original English; "
+        "do not translate or transliterate them. Keep all structure in English "
+        "exactly as specified: card headings (# I001), the field names Title, Type, "
+        "Description, Workflow, Example and Evidence, the Type values user-agent and "
+        "agent, and line labels (L001)."
+    ),
+}
 # Reading guidance differs by host because the file tools and their limits differ.
 HOST_NOTES = {
     "codex": (
@@ -102,7 +129,15 @@ def paths(value):
     return source, Path(str(source) + ".oxygen-agents")
 
 
-def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex"):
+def language_block(language):
+    if language is None:
+        return b""
+    if language not in LANGUAGES:
+        raise RunError("unsupported_language")
+    return f"# Output language\n\n{LANGUAGE_RULES[language]}\n\n".encode()
+
+
+def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex", language=None):
     notes = b"# Host notes\n\n" + HOST_NOTES[host].encode() + b"\n\n"
     wrapper = notes + (SKILL / "references" / f"{stage}-worker.md").read_bytes()
     prompt = (HUMANIZER.instructions(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER)) if stage == "humanize"
@@ -121,34 +156,42 @@ def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex"):
                 raise RunError("category_reference_unavailable") from exc
             helper += b"\n\n" + categories
         helper += b"\n# Label helper command (JSON argv prefix)\n" + encode([sys.executable, str(label_script)])
-    return wrapper + b"\n" + prompt + helper + b"\n\n# Per-item input (JSON data)\n"
+    return (wrapper + b"\n" + prompt + helper + b"\n\n" + language_block(language)
+            + b"# Per-item input (JSON data)\n")
 
 
-def host_settings(host="codex", model=None):
+def host_settings(host="codex", model=None, effort=None):
+    if model is not None and not MODEL_PATTERN.fullmatch(model):
+        raise RunError("invalid_worker_model")
+    if effort is not None and effort not in EFFORTS:
+        raise RunError("invalid_worker_effort")
     if host == "codex":
-        if model not in {None, MODEL}:
-            raise RunError("codex_host_model_is_fixed")
         return {"tool": "collaboration.spawn_agent",
-                "model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none"}
+                "model": model or MODEL, "reasoning_effort": effort or EFFORT, "fork_turns": "none"}
     if host == "claude":
-        # Agent-tool workers start from a fresh context unless a fork is requested;
-        # reasoning effort is inherited from the worker definition, not set per call.
-        return {"host": "claude", "tool": "Agent", "subagent_type": CLAUDE_SUBAGENT,
-                "model": model or CLAUDE_MODEL, "run_in_background": True,
-                "context": "fresh"}
+        # Agent-tool workers start from a fresh context unless a fork is requested.
+        # Reasoning effort is recorded only when the contributor chose one.
+        settings = {"host": "claude", "tool": "Agent", "subagent_type": CLAUDE_SUBAGENT,
+                    "model": model or CLAUDE_MODEL, "run_in_background": True,
+                    "context": "fresh"}
+        if effort:
+            settings["reasoning_effort"] = effort
+        return settings
     raise RunError("unsupported_worker_host")
 
 
-def configuration(host="codex", model=None):
+def configuration(host="codex", model=None, effort=None, language=None):
     return {
         "protocol_version": PROTOCOL_VERSION,
         "stage_order": list(STAGES),
-        **host_settings(host, model),
+        **host_settings(host, model, effort),
+        **({"language": language} if language else {}),
         "helper_sha256": sha(Path(__file__).read_bytes()),
         "labeler_sha256": sha(LABEL_SCRIPT.read_bytes()),
         "card_parser_sha256": sha(CARD_SCRIPT.read_bytes()),
         "card_format_sha256": sha(CARD_FORMAT.read_bytes()),
-        "template_sha256": {stage: sha(fixed_template(stage, host=host)) for stage in STAGES},
+        "template_sha256": {stage: sha(fixed_template(stage, host=host, language=language))
+                            for stage in STAGES},
         "prompt_sha256": {stage: sha((HUMANIZER_WRAPPER if stage == "humanize" else
                                       KIT / "prompts" / STAGES[stage][0]).read_bytes()) for stage in STAGES},
         "tools_and_sandbox": "inherited from the host; not independently configurable by this tool",
@@ -165,6 +208,7 @@ def call_arguments(stage, source, *, config=None, template=None):
         return {
             "description": f"Oxygen {stage} {tag[:8]}",
             **{key: config[key] for key in ("subagent_type", "model", "run_in_background")},
+            **({"reasoning_effort": config["reasoning_effort"]} if "reasoning_effort" in config else {}),
             "prompt": message,
         }
     return {
@@ -206,7 +250,7 @@ def live_session_storage(source):
     return "projects" in parts and any(part.startswith(".claude") for part in parts)
 
 
-def prepare(value, *, host="codex", model=None):
+def prepare(value, *, host="codex", model=None, effort=None, language=None):
     source, run = paths(value)
     if source.suffix.lower() not in {".json", ".jsonl", ".md"}:
         raise RunError("expected_json_jsonl_or_markdown")
@@ -226,7 +270,7 @@ def prepare(value, *, host="codex", model=None):
             data.decode("utf-8")
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise RunError("malformed_input") from exc
-    config = configuration(host, model)
+    config = configuration(host, model, effort, language)
     run.mkdir(mode=0o700)
     run.chmod(0o700)
     for stage in STAGES:
@@ -244,7 +288,7 @@ def prepare(value, *, host="codex", model=None):
                  "humanizer_protocol.py": HUMANIZER_SCRIPT.read_bytes(),
                  "insight_cards.py": CARD_SCRIPT.read_bytes()}
     snapshots.update(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER))
-    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host)
+    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host, language)
                       for stage in STAGES})
     for name, content in snapshots.items():
         (protocol / name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -344,7 +388,7 @@ def prepare_summary_labels(run):
     labeler.label_file(directory / "summary.md", directory / "summary_labeled.md")
 
 
-def prepare_insight(value, previous_run, *, host="codex", model=None):
+def prepare_insight(value, previous_run, *, host="codex", model=None, effort=None, language=None):
     """Start a new run from a verified accepted summary, without a summary worker."""
     source, run = paths(value)
     prior = Path(previous_run).expanduser()
@@ -380,7 +424,7 @@ def prepare_insight(value, previous_run, *, host="codex", model=None):
     if source.exists() or run.exists():
         raise RunError("import_destination_already_exists")
     write_new(source, frozen)
-    result = prepare(source, host=host, model=model)
+    result = prepare(source, host=host, model=model, effort=effort, language=language)
     for name, data in summary.items():
         write_new(run / "summary" / name, data)
     manifest = load_run(source, run)
@@ -522,19 +566,22 @@ def accept(value, stage, *, worker_id=None, worker_status=None):
     return locked(value, finish)
 
 
-async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model=None):
+async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model=None,
+                      effort=None, language=None, progress=None):
     """Dispatch -> await terminal result -> validate -> advance, using host adapters.
 
     dispatch(arguments) must asynchronously return the actual worker ID.
     wait(worker_id) must asynchronously return {"status": "complete"} only after
     successful worker termination AND a successful task result; all other results
     stop this item. Adapters must not retry dispatch or convert errors to success.
+    progress(stage, "started" | "complete") is an optional observer for each stage.
     """
+    note = progress or (lambda stage, event: None)
     source, run = paths(value)
     if run.exists():
         verify_resume(source)
     else:
-        prepare(source, host=host, model=model)
+        prepare(source, host=host, model=model, effort=effort, language=language)
     stages = stage_order(load_run(source, run))
     if not redact:
         stages = [stage for stage in stages if stage != "redaction"]
@@ -544,6 +591,7 @@ async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model
             continue
         if state.get("status") == "failed":
             raise RunError("stage_failed_use_new_run")
+        note(stage, "started")
         if state:
             worker_id = state.get("worker_id")
             if not worker_id:
@@ -558,6 +606,7 @@ async def orchestrate(value, dispatch, wait, *, redact=True, host="codex", model
                 accept(source, stage, worker_id=worker_id, worker_status="error")
             raise RunError("worker_not_complete")
         accept(source, stage, worker_id=worker_id, worker_status=result["status"])
+        note(stage, "complete")
     manifest = load_run(source, run)
     return {"status": "complete", "stages": stages, "run_complete": manifest["complete"]}
 
@@ -572,11 +621,13 @@ def main(argv=None):
     parser.add_argument("--worker-status", choices=("complete", "error"), help="Task result observed after worker termination; required for accept-*")
     parser.add_argument("--host", choices=HOSTS, help="Worker host for prepare/prepare-insight; saved in the run. "
                         "Defaults to OXYGEN_WORKER_HOST or codex")
-    parser.add_argument("--model", help="Claude host only: Agent-tool model alias (default opus)")
+    parser.add_argument("--model", help="Worker model; saved in the run (defaults: gpt-6.1-sol for Codex, opus for Claude Code)")
+    parser.add_argument("--effort", choices=EFFORTS, help="Worker reasoning effort; saved in the run (Codex default: high)")
+    parser.add_argument("--language", choices=tuple(LANGUAGES), help="Output language of the readable text; saved in the run. Defaults to the prompts' own language")
     args = parser.parse_args(argv)
     preparing = args.action in {"prepare", "prepare-insight"}
-    if (args.host or args.model) and not preparing:
-        parser.error("--host and --model apply only to prepare and prepare-insight; runs keep their saved host")
+    if (args.host or args.model or args.effort or args.language) and not preparing:
+        parser.error("--host, --model, --effort and --language apply only to prepare and prepare-insight; runs keep their saved settings")
     host = args.host or os.environ.get("OXYGEN_WORKER_HOST") or "codex"
     if host not in HOSTS:
         parser.error("OXYGEN_WORKER_HOST must be one of: " + ", ".join(HOSTS))
@@ -590,9 +641,9 @@ def main(argv=None):
         parser.error("--stage is required only with record-worker; --worker-status only with accept-*")
     try:
         if args.action == "prepare":
-            result = prepare(args.input_path, host=host, model=args.model)
+            result = prepare(args.input_path, host=host, model=args.model, effort=args.effort, language=args.language)
         elif args.action == "prepare-insight":
-            result = prepare_insight(args.input_path, args.from_run, host=host, model=args.model)
+            result = prepare_insight(args.input_path, args.from_run, host=host, model=args.model, effort=args.effort, language=args.language)
         elif args.action == "record-worker":
             result = record_worker(args.input_path, args.stage, args.worker_id)
         elif args.action == "verify-resume":

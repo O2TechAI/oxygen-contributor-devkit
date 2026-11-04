@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Start Oxygen: the review app and the local service for your Codex / Claude Code sessions.
+set -euo pipefail
+cd "$(dirname "$0")/review-app"
+exec node scripts/oxygen.mjs "$@"
