@@ -120,3 +120,29 @@ void test('zero global candidates is a valid empty result', async () => {
     0,
   );
 });
+
+void test('a generated result is imported under its own source path', () => {
+  assert.equal(
+    globalImportPayload({}, { sourcePath: 'submission-s1-insights-j1' })
+      .sourcePath,
+    'submission-s1-insights-j1',
+  );
+  assert.equal(globalImportPayload({}).sourcePath, 'cross-session-candidates');
+});
+
+void test('every global candidate is imported, in order', async () => {
+  const data = globalFixture();
+  data.candidates.push({
+    ...data.candidates[0],
+    id: 'C002',
+    title: 'Withhold completion until records are present',
+  });
+  const review = await parseGlobalReview(globalImportPayload(data));
+  assert.deepEqual(
+    review.insights.map((card) => [card.id, card.sourceId, card.title]),
+    [
+      ['I001', 'C001', 'Verify coverage before declaring completion'],
+      ['I002', 'C002', 'Withhold completion until records are present'],
+    ],
+  );
+});

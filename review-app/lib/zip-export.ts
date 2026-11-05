@@ -74,7 +74,7 @@ export function zipFiles(files: Record<string, string>): ArrayBuffer {
   return bytes.buffer;
 }
 
-type Collection = {
+export type Collection = {
   format: string;
   exportedAt: string;
   reviewCount: number;
@@ -86,7 +86,13 @@ type Collection = {
   }>;
 };
 
-export function collectionZip(collection: Collection): ArrayBuffer {
+/**
+ * The extracted layout of a collection export: manifest.json plus one folder of
+ * files per review. The cross-session helper reads exactly this layout.
+ */
+export function collectionFiles(
+  collection: Collection,
+): Record<string, string> {
   const files: Record<string, string> = {};
   const safe = (value: string) =>
     value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
@@ -101,5 +107,9 @@ export function collectionZip(collection: Collection): ArrayBuffer {
   );
   files['manifest.json'] =
     JSON.stringify({ ...collection, reviews: manifest }, null, 2) + '\n';
-  return zipFiles(files);
+  return files;
+}
+
+export function collectionZip(collection: Collection): ArrayBuffer {
+  return zipFiles(collectionFiles(collection));
 }

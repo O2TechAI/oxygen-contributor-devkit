@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -293,6 +294,71 @@ class CollectWorkspaceSessionsTests(unittest.TestCase):
         self.assertNotIn(b"REMOVE_THIS_OUTPUT", output.read_bytes())
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(self.snapshot(manifest).read_bytes(), original)
+
+
+def compress_rollout(path):
+    """Compress a rollout in place, as Codex does with older sessions; None without zstd."""
+    target = path.with_name(path.name + ".zst")
+    try:
+        kind, backend = COLLECT._zstd_backend()
+    except COLLECT.CollectionError:
+        return None
+    if kind == "stdlib":
+        target.write_bytes(backend.compress(path.read_bytes()))
+    elif kind == "zstandard":
+        target.write_bytes(backend.ZstdCompressor().compress(path.read_bytes()))
+    else:
+        subprocess.run([backend, "-q", str(path), "-o", str(target)], check=True)
+    path.unlink()
+    return target
+
+
+class CompressedRolloutTests(unittest.TestCase):
+    setUp = CollectWorkspaceSessionsTests.setUp
+    source = CollectWorkspaceSessionsTests.source
+    collect = CollectWorkspaceSessionsTests.collect
+    snapshot = CollectWorkspaceSessionsTests.snapshot
+
+    def compressed(self, body, fragment=b""):
+        path = self.source(body=body)
+        expected = path.read_bytes()
+        path.write_bytes(expected + fragment)
+        target = compress_rollout(path)
+        if target is None:
+            self.skipTest("no zstd decoder available")
+        return target, expected
+
+    def test_compressed_rollouts_are_found_and_frozen_decompressed(self):
+        body = record("response_item", {"type": "message", "role": "user", "content": []})
+        target, expected = self.compressed(body, fragment=b'{"in_progress":')
+        self.source("plain")
+        result = self.collect()
+        self.assertTrue(result["complete"])
+        self.assertEqual({x["session_id"] for x in result["sessions"]}, {"main", "plain"})
+        entry = next(x for x in result["sessions"] if x["session_id"] == "main")
+        self.assertEqual(entry["source_path"], str(target))
+        self.assertEqual((self.output / entry["snapshot_path"]).read_bytes(), expected)
+        self.assertEqual(entry["sha256"], hashlib.sha256(expected).hexdigest())
+        self.assertEqual(stat.S_IMODE((self.output / entry["snapshot_path"]).stat().st_mode), 0o600)
+
+    def test_command_line_decoder_is_a_fallback(self):
+        binary = shutil.which("zstd")
+        if binary is None:
+            self.skipTest("zstd command not installed")
+        target, expected = self.compressed(record("turn_context", {"cwd": str(self.workspace)}))
+        with patch.object(COLLECT, "_zstd_backend", return_value=("cli", binary)):
+            result = self.collect()
+            self.assertEqual(b"".join(COLLECT.complete_lines(target)), expected)
+        self.assertEqual(self.snapshot(result).read_bytes(), expected)
+
+    def test_missing_decoder_is_reported_without_stopping_others(self):
+        self.compressed(b"")
+        self.source("plain")
+        with patch.object(COLLECT, "_zstd_backend", side_effect=COLLECT.CollectionError("zstd_unavailable")):
+            result = self.collect()
+        self.assertEqual([x["session_id"] for x in result["sessions"]], ["plain"])
+        self.assertEqual([e["reason"] for e in result["errors"]], ["zstd_unavailable"])
+        self.assertFalse(result["complete"])
 
 
 if __name__ == "__main__":

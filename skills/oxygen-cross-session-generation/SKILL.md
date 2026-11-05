@@ -35,11 +35,18 @@ Run commands from this skill directory, supplying absolute paths for INPUT and R
 Choose a new timestamped private RUN outside INPUT, following the workspace's
 storage policy. Retain only a compact report in the repository.
 
-1. `python3 scripts/cross_session.py prepare INPUT --run RUN`
+1. `python3 scripts/cross_session.py prepare INPUT --run RUN [--host codex|claude] [--model MODEL] [--effort EFFORT]`
+   The worker agent, model and reasoning effort are the user's choice: use the
+   values the user gave, or ask before preparing. Without flags, `OXYGEN_WORKER_HOST`,
+   `OXYGEN_WORKER_MODEL` and `OXYGEN_WORKER_EFFORT` apply; without those, Codex
+   workers use `gpt-6.1-sol` with high reasoning and Claude Code workers use `opus`.
+   The choice is saved in the run's `config.json`, both dispatches, and the final
+   `cross_session_insights.json`, and later commands cannot change it.
 2. `python3 scripts/cross_session.py call RUN`
-3. Pass the returned arguments unchanged to `collaboration.spawn_agent`. Defaults
-   are `gpt-6.1-sol`, high reasoning, and `fork_turns="none"`. The short dispatch
-   loads the full frozen [worker instructions](references/synthesis-worker.md)
+3. Pass the returned arguments unchanged to the host's worker tool:
+   `collaboration.spawn_agent` for Codex (`fork_turns="none"`), or the Agent tool
+   for Claude Code (its prompt begins with Claude-specific host notes). The short
+   dispatch loads the full frozen [worker instructions](references/synthesis-worker.md)
    from a file, avoiding manual reconstruction of the prompt.
 4. Immediately record the actual returned ID:
    `python3 scripts/cross_session.py record-worker RUN --worker-id WORKER_ID`
@@ -56,7 +63,8 @@ storage policy. Retain only a compact report in the repository.
 `call` is issued once per stage. If dispatch was issued but its ID was lost, reconcile the
 host log before recording it; do not spawn a replacement silently. Errors preserve
 the run for inspection. Report invalid input or failed worker output rather than
-repairing prose in the coordinator. A deliberate retry uses a new run directory.
+repairing prose in the coordinator. A deliberate retry uses a new run directory
+with the same worker choice unless the user changes it.
 
 Frozen helpers handle subsequent commands even if repository code changes.
 `python3 scripts/cross_session.py verify RUN --check-originals` checks frozen files,
@@ -90,8 +98,10 @@ and draft status; the top-level source catalog retains input review decisions.
 Per-candidate source-card mappings are no longer required or generated.
 Earlier runs retain their saved instructions, helpers, and output requirements.
 
-Import the accepted `cross_session_insights.json` through **Import review** in the
-review app to start a separate global review. All candidates start pending; source
+The review app's **Submit** page runs these same steps for a submission
+(`tools/oxygen_run.py cross-session`) and imports the result itself. By hand,
+post the accepted `cross_session_insights.json` to the review app (`POST /api/reviews`
+with `format: "global"` and the file as `globalCandidates`) to start a separate global review. All candidates start pending; source
 summaries and qualified citations remain available alongside editable cards and
 saved revision diffs. Completing that review is editorial approval, not privacy
 certification. Do not feed global review exports back as individual trajectories.

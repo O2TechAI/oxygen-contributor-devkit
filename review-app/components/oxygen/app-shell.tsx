@@ -7,9 +7,10 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, X } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { InsightJobsContext, useInsightJobs } from '@/hooks/use-insight-jobs';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -107,11 +108,14 @@ export function AppShell({
   active,
   children,
 }: {
-  active: (typeof NAV)[number]['id'];
+  /** The highlighted header link; submission pages highlight none. */
+  active: (typeof NAV)[number]['id'] | 'submit';
   children: ReactNode;
 }) {
   const [access, setAccess] = useState<Access>('checking');
   const [configured, setConfigured] = useState(false);
+  const jobs = useInsightJobs(access === 'signed_in');
+  const announced = jobs.ready[0];
 
   useEffect(() => {
     let cancelled = false;
@@ -190,7 +194,37 @@ export function AppShell({
           </nav>
         </div>
       </header>
-      {children}
+      {announced && (
+        <output className="block border-b bg-[color:var(--ui-callout)] px-4 py-2 sm:px-6">
+          <span className="mx-auto flex max-w-[1040px] items-center justify-between gap-3 text-sm">
+            <span>
+              {announced.job.candidateCount === 1
+                ? '1 cross-session insight is ready to review.'
+                : `${announced.job.candidateCount} cross-session insights are ready to review.`}
+            </span>
+            <span className="flex items-center gap-1">
+              <Link
+                href={`/review?review=${announced.reviewId}`}
+                onClick={() => jobs.dismiss(announced.job.id)}
+                className={buttonVariants({ size: 'sm' })}
+              >
+                Open
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Dismiss"
+                onClick={() => jobs.dismiss(announced.job.id)}
+              >
+                <X />
+              </Button>
+            </span>
+          </span>
+        </output>
+      )}
+      <InsightJobsContext.Provider value={jobs}>
+        {children}
+      </InsightJobsContext.Provider>
     </div>
   );
 }

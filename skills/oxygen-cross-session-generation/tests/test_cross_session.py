@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import stat
@@ -54,6 +55,12 @@ class CrossSessionLifecycleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.inputs = self.root / "exports"
         self.run = self.root / "run"
+        # Worker choices from the developer's own environment must not change the defaults.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for name in ("OXYGEN_WORKER_HOST", "OXYGEN_WORKER_MODEL", "OXYGEN_WORKER_EFFORT"):
+            os.environ.pop(name, None)
         self.live_skill = self.root / "live-skill"
         shutil.copytree(SKILL, self.live_skill,
                         ignore=shutil.ignore_patterns("tests", "__pycache__"))
@@ -128,6 +135,64 @@ class CrossSessionLifecycleTests(unittest.TestCase):
             (self.run / "cross_session_insights.md").read_bytes() if text is None else text.encode())
         CROSS.write(self.run / "humanize/completion.json", {"status": "complete", "readingComplete": True})
         return CROSS.accept(self.run, "humanizer-test-worker", "complete", "humanize")
+
+    def test_chosen_worker_settings_reach_config_dispatches_and_results(self):
+        CROSS.prepare(self.inputs, self.run, model="gpt-6.1-terra", effort="medium")
+        config = CROSS.load(self.run / "config.json")
+        self.assertEqual((config["model"], config["reasoning_effort"]), ("gpt-6.1-terra", "medium"))
+        for name in ("dispatch.json", "humanize-dispatch.json"):
+            call = CROSS.load(self.run / name)
+            self.assertEqual((call["model"], call["reasoning_effort"]), ("gpt-6.1-terra", "medium"))
+        self.assertEqual(CROSS.load(self.run / "manifest.json")["config"], config)
+        CROSS.issue_call(self.run)
+        CROSS.record_worker(self.run, "test-worker-no-model-launched")
+        self.read_all()
+        self.write_outputs()
+        self.accept()
+        self.humanize()
+        final = CROSS.load(self.run / "humanize/cross_session_insights.json")
+        self.assertEqual((final["config"]["model"], final["config"]["reasoning_effort"]), ("gpt-6.1-terra", "medium"))
+
+    def test_claude_host_gets_agent_tool_dispatches_and_host_notes(self):
+        CROSS.prepare(self.inputs, self.run, host="claude")
+        config = CROSS.load(self.run / "config.json")
+        self.assertEqual((config["host"], config["model"]), ("claude", "opus"))
+        self.assertNotIn("reasoning_effort", config)
+        for name, stage in (("dispatch.json", "synthesis"), ("humanize-dispatch.json", "humanize")):
+            call = CROSS.load(self.run / name)
+            self.assertEqual(set(call), {"description", "subagent_type", "model", "run_in_background", "prompt"})
+            self.assertIn(stage, call["description"])
+            self.assertEqual(call["model"], "opus")
+        prompt = (self.run / "protocol/worker-prompt.md").read_text()
+        frozen_worker = (self.run / "protocol/references/synthesis-worker.md").read_text()
+        self.assertTrue(prompt.startswith(CROSS.CLAUDE_HOST_NOTES + frozen_worker + "\n\n## This run\n\n"))
+        humanize = (self.run / "protocol/humanize-worker-prompt.md").read_text()
+        self.assertTrue(humanize.startswith(CROSS.CLAUDE_HOST_NOTES))
+
+    def test_environment_supplies_worker_defaults_and_explicit_choices_win(self):
+        with mock.patch.dict(os.environ, {"OXYGEN_WORKER_HOST": "claude", "OXYGEN_WORKER_MODEL": "sonnet",
+                                          "OXYGEN_WORKER_EFFORT": "low"}):
+            self.assertEqual(CROSS.worker_settings(), {"host": "claude", "model": "sonnet", "reasoning_effort": "low"})
+            self.assertEqual(CROSS.worker_settings(host="codex", model="gpt-6.1-terra"),
+                             {"model": "gpt-6.1-terra", "reasoning_effort": "low", "fork_turns": "none"})
+
+    def test_invalid_worker_settings_create_no_run(self):
+        for choice in ({"host": "gemini"}, {"model": "bad model"}, {"effort": "extreme"}):
+            with self.subTest(choice=choice):
+                with self.assertRaises(ValueError):
+                    CROSS.prepare(self.inputs, self.run, **choice)
+                self.assertFalse(self.run.exists())
+
+    def test_cli_prepare_takes_worker_choices_and_later_commands_do_not(self):
+        proc = subprocess.run([sys.executable, str(SCRIPT), "prepare", str(self.inputs), "--run", str(self.run),
+                               "--host", "claude", "--model", "sonnet", "--effort", "medium"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        call = CROSS.load(self.run / "dispatch.json")
+        self.assertEqual((call["model"], call["reasoning_effort"]), ("sonnet", "medium"))
+        proc = subprocess.run([sys.executable, str(SCRIPT), "call", str(self.run), "--model", "other"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2)
 
     def test_humanizer_finishes_run_and_preserves_extraction_receipts(self):
         self.accepted_run()

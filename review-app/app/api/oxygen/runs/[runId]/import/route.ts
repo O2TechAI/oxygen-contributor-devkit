@@ -1,4 +1,4 @@
-import { createReview } from '@/db/reviews';
+import { createReview, listReviews } from '@/db/reviews';
 import { callBridge } from '@/lib/bridge';
 import { isAuthenticated, unauthorizedResponse } from '@/lib/auth';
 import { isReviewCreatePayload } from '@/lib/review-import';
@@ -18,7 +18,28 @@ async function importTrajectory(runId: string, index: number) {
   }
   const existing = (state.data as { imports?: Record<string, Imported> })
     .imports?.[String(index)];
-  if (existing) return existing;
+  if (existing) {
+    const reviews = await listReviews();
+    const has = (id: string) => reviews.some((review) => review.id === id);
+    if (has(existing.redaction) && has(existing.humanize)) return existing;
+    // A privacy cleanup gives a review a new id but keeps its source path.
+    const prefix = `run-${runId}-trajectory-${String(index).padStart(3, '0')}`;
+    const current = (id: string, label: string) =>
+      has(id)
+        ? id
+        : reviews.find((review) => review.sourcePath === `${prefix}-${label}`)
+            ?.id;
+    const redaction = current(existing.redaction, 'redacted');
+    const humanize = current(existing.humanize, 'humanized');
+    if (redaction && humanize) {
+      const found = { redaction, humanize };
+      await callBridge(`${base}/trajectories/${index}/imported`, {
+        method: 'POST',
+        body: found,
+      });
+      return found;
+    }
+  }
 
   const prepared = await callBridge(`${base}/trajectories/${index}/payloads`);
   if (prepared.status !== 200) {

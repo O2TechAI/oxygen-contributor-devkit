@@ -43,11 +43,25 @@ separate proposed, attempted, reported, and observed outcomes in examples.
 
 The review page opens in a one-card layout. It shows the current Insight with the
 text of each cited Summary line directly beneath it, so a decision does not need
-scrolling through the full Summary. Accepting or declining moves to the next card that
-still needs a decision, continuing into the next trajectory's review when the current
-one is finished. The two buttons beside the progress count switch to the side-by-side
-Summary and cards layout; the choice is remembered in this browser. Clicking an
-evidence label opens that line in the side-by-side layout.
+scrolling through the full Summary. Accepting or declining moves to the next card of
+this review that still needs a decision; it never jumps to another trajectory. The two
+buttons beside the progress count switch to the side-by-side Summary and cards layout;
+the choice is remembered in this browser. Clicking an evidence label opens that line in
+the side-by-side layout.
+
+A trajectory is one agent session, named by when the session started and the agent's
+own title for it (the Codex thread name or Claude Code session title; otherwise the
+Summary's first specific heading, then the first request). The sidebar on the left
+lists every trajectory oldest first with its status; open any of them without finishing
+the current one. A session processed by several runs lists each run beneath it. The
+sidebar button in the header hides it (a slide-over on narrow screens).
+
+Each trajectory has a **Redacted** and an **Unredacted** version, switched in the
+header; the page opens the redacted one. The first edit of an unredacted version asks
+for confirmation, because its text has not been through privacy redaction; it can still
+be completed and submitted. After **Complete**, the page offers the next unfinished
+trajectory (the next in time by default, any other from the list) or to stay.
+Without the local service, trajectories are named from their Summary and run.
 
 Keyboard shortcuts work in the one-card layout unless a dialog or text field has
 focus: `A` accept, `D` decline, `E` edit, `J` or the right arrow for the next card,
@@ -60,6 +74,19 @@ installed and signed in on this computer. **Ask** answers questions about the re
 **Edit** revises the selected card, or any cards when the scope is "Whole review", and
 can add a new card. Edit is available for skill-candidate (v9) reviews. Edited and added cards go
 back to Pending, appear in **Changes** with the request, and can be undone from the bar.
+Every request is saved in the review's history as its own version: an edit with the full
+request and the agent's explanation, a question (or an edit that changed nothing) with the
+answer and unchanged content.
+
+**Privacy requests.** In Edit, a request to remove, anonymize, mask or redact information
+(a name, identifier, path, credential…) applies to the whole review, including Summary
+headings and the project name, whatever card is selected. The page then warns before
+saving: the cleaned review replaces the current one under a new address, **every earlier
+saved version is deleted** (including earlier requests and agent answers), and the cleaned
+version becomes the new starting version 0. The request text itself is not saved. Changed
+cards go back to Pending. The review keeps its place among the trajectories; import hashes
+are dropped, so it can be completed without them. Not covered: the trajectory's other
+version, earlier submissions or exports, and the run's files on this computer.
 Choose the agent, model and reasoning effort beside the input; the lists come from the
 installed CLI. Press `/` to focus the input and Enter to send.
 
@@ -161,38 +188,22 @@ decisions, and deletions from the database. Unsaved edits and checkbox selection
 are browser-session state. Export bundles are outputs, not database backups or
 editable-session import files.
 
-## Conversational review
-
-Use the [assisted-review skill](../skills/oxygen-assisted-review/SKILL.md) when
-asking an agent to edit the open review. The URL identifies the review and
-selected insight. The helper retains each request and its resulting snapshot;
-after saving, the agent automatically refreshes or opens the returned link to
-show **Changes** inside the app.
-The agent uses the repository's local Humanizer when rewriting or adding insights,
-as part of the same edit. It preserves the current summary as factual support,
-the user's defining requirements, and useful structure while reducing information
-density. Unrelated cards remain unchanged.
-Workspace browser tools such as Codex use the helper's `openUrl`; `url` is the
-client-facing link. Reopening a client's temporary forwarded port from the
-workspace can fail, so check the server address and host before opening it.
-Changes show saved versions with line-by-line additions and removals, including
-decisions. Comment-only requests keep an unchanged snapshot.
+## Saved versions
 
 Browser and agent saves check the version they started from. A conflict keeps
 the browser draft available for reconciliation instead of overwriting newer
-work. Explicit privacy requests replace the review with a new opaque identity
-and a single initial baseline. Earlier originals, revisions, requests, diffs,
-and source-linked receipts are discarded; the agent opens the new initial state.
-Ordinary edits and deletions preserve history. See the skill for archive and
-backup scope.
+work. Privacy requests replace the review with a new identity and a single
+initial baseline. Earlier originals, revisions, requests, diffs, and import
+hashes are discarded; the page opens the new initial state. Ordinary edits and
+deletions preserve history.
 
 ## Publish a completed run
 
-You can also choose **Import review** in the app and select a prepared run JSON
-payload (such as `trajectory-001-redaction.json` from a completed run's
-`review-imports` directory). The app shows the project, source, protocol, stage,
-and card count after checking the manifest hashes, fields, and citations. Choose
-**Import and open review** to create a separate review. Wait for automatic saving before importing. Existing reviews and annotations are preserved.
+Runs started from the Projects page are imported when you open a finished
+trajectory. A prepared run JSON payload (such as `trajectory-001-redaction.json`
+from a completed run's `review-imports` directory) can be posted to the app by the
+publisher; the app checks the manifest hashes, fields, and citations and creates
+a separate review. Existing reviews and annotations are preserved.
 
 This accepts the same payload as `POST /api/reviews`, including v9's Description,
 Workflow, and Example. Preserve the `protocolVersion` recorded in the run
@@ -265,51 +276,32 @@ Scope/Takeaway cards. The database stores these formats in its existing JSON col
   original and revision content; stored originals and history remain preserved.
   The opt-in edit-history export is the exception: its earlier versions still
   contain cards that were deleted later.
-- Completion requires a redacted input and an accepted or rejected decision
-  for every Insight. Empty Insight output is valid.
+- Completion requires an accepted or rejected decision for every Insight, in
+  either version of a trajectory. Empty Insight output is valid.
 
 After editing, choose **Apply edit**; decisions, applied edits, and deletions save
-automatically after a short pause. **Export** waits for pending saves, including
-edits made while a save is in flight. Failed saves retain local changes and show
-**Retry autosave**; export and switching reviews wait for a successful save.
-Apply or cancel an open editor before exporting. Closing or refreshing with a
-pending save shows a browser warning. Unapplied editor drafts are not autosaved.
-Unredacted reviews and drafts can be exported without completing them.
-Open **Trajectories** for one row per trajectory, with its unredacted and redacted
-versions, review status, and accepted/declined/pending counts. Search or filter by
-run, version, and review status. On initial load, redacted versions from the
-current run are selected by default, including unfinished reviews. Unredacted
-versions use the humanized output, start unchecked, and can be selected manually. Use **Select all filtered**, **Select all in
-current run**, or individual checkboxes; **View selected** shows the full selection.
-Selections remain checked while you open and edit individual reviews. Apply editor changes before opening another review or exporting; pending saves
-are flushed automatically.
-The default **All review versions** filter shows humanized unredacted, redacted,
-and global reviews. Each can also be shown separately. **Earlier extraction drafts** explicitly opens older, raw
-extraction imports; these are never relabeled as humanized output. The run filter lists individual
-runs. **View selected** shows checked versions across runs and temporarily
-disables the run filter; returning to the full list restores that filter.
+automatically after a short pause. Failed saves retain local changes and show
+**Retry autosave**; submitting and switching reviews wait for a successful save.
+Closing or refreshing with a pending save shows a browser warning. Unapplied
+editor drafts are not autosaved.
 
-**Export selected (N)** downloads a ZIP by default, organized by run, trajectory,
-and review version, with `manifest.json` listing every included review and its
-artifact directory. **Combined JSON** remains available. By default an export
-contains only the latest saved edited content. Original copies, previous revisions,
-change notes, and trashed insights are excluded unless **Include edit history** is
-checked (see below). The preview reports selected trajectories,
-versions, and accepted/declined Insight counts, including pending insights in the
-accepted total. Both single-review and bulk export warn when labeling is incomplete
-and offer **Keep labeling** or **Export anyway**. Pending insights export as
-accepted by default; their saved labels and the review's completion state remain
-unchanged. Insights marked **Evidence changed** remain excluded until reviewed,
-and the warning reports their count separately. Deleted insights stay excluded.
+**Submit…** beside **Complete** is the one way to hand work in; it becomes
+available once the open review is completed, and opens by itself after the last
+trajectory (or a global insights review) is completed. It lists every trajectory
+with its completed versions, checked by default (the redacted version when both
+were completed), plus completed global insights reviews. When the trajectories a
+global review was generated from are unchanged, the panel says the global insights
+are complete and nothing needs to be generated again. Submitting freezes the
+selection (see **Submit trajectories** below) and opens the submission, where the
+contribution package is downloaded and cross-session insights are generated.
+The ⋯ menu keeps only the review guide, page information and sign-out.
 
-`POST /api/reviews/export` accepts `reviewIds`, optional `format` (`zip` or `json`,
-default `json`), and optional `includeHistory` (`true` or `false`, default `false`).
-Other historical export options from older clients are ignored. A single review
-downloads from `GET /api/reviews/<id>/export`; add `?history=1` to include its
-history. Open `?review=<id>&trajectories=1&run=<run-id>`
-to show that run with its redacted versions selected immediately; this does not
-reset any reviews. Reopening the panel preserves your checkbox choices, including
-an explicitly cleared selection.
+For scripts, `POST /api/reviews/export` accepts `reviewIds`, optional `format`
+(`zip` or `json`, default `json`), and optional `includeHistory` (`true` or
+`false`, default `false`); a single review downloads from
+`GET /api/reviews/<id>/export`, with `?history=1` to include its history.
+Pending insights export as accepted by default; their saved labels and the
+review's completion state remain unchanged.
 
 The export endpoint returns an `oxygen-human-review-bundle/v1` JSON document
 whose `files` object contains:
@@ -337,15 +329,16 @@ and are not exported.
 
 ### Edit history export
 
-**Include edit history** in the Trajectories panel, or **Export with history** in
-the ⋯ menu, adds two files to each review's bundle; the latest-content files above
+**Include edit history and agent requests** in the Submit panel (on by default)
+adds two files per review under the submission's `history/` folder, and
+`?history=1` adds them to a single-review export; the latest-content files above
 are unchanged:
 
 - `history.json` (`oxygen-review-history/v1`): every saved version, oldest first.
   Version 0 is the imported original (or the sanitized baseline after privacy
   cleanup). Each later version is one save: browser decisions and edits, or an
-  assisted-review request. Each snapshot has `version`, `kind` (`initial`, `edit`,
-  or `privacy`), `createdAt`, `note` (for assisted-review saves, the exact request),
+  agent request. Each snapshot has `version`, `kind` (`initial`, `edit`,
+  or `privacy`), `createdAt`, `note` (for agent requests, the exact request),
   optional `requestId`, and the complete `state`: summary, summary lines, and
   insight cards with their statuses. Embedded `originalText` fields are omitted.
 - `history.md`: the same versions as a readable timeline, with each note quoted
@@ -375,7 +368,7 @@ The historical `POST /api/reviews` pair format remains supported:
 
 ## Local trajectory reviews
 
-Import project trajectories through **Import review** or the publisher. Generated
+Trajectories come from runs on the Projects page or from the publisher. Generated
 trajectory data stays in local run artifacts and the review database rather than
 being bundled into the app. Existing database reviews and saved revisions remain
 available, including previously imported protocol 7 examples.
@@ -396,9 +389,11 @@ annotations, frozen prompts, and validators are not converted.
 
 ## Review global insights
 
-After individual reviews are finished, run `oxygen-cross-session-generation` on
-those exports. In **Import review**, select its `cross_session_insights.json`
-(v2) to open a separate **Global review**. The page shows all supplied source
+After individual reviews are finished, submit them and choose **Generate
+cross-session insights** on the submission; the result opens as a separate
+**Global review** (a `cross_session_insights.json` from the skill run by hand can
+be posted to `POST /api/reviews` as a `global` payload). Once it is completed,
+**Submit…** includes it with the trajectories. The page shows all supplied source
 summaries, clickable qualified evidence such as `S002:L003`, and new pending
 cards. Edit, accept or decline, inspect **Saved changes**, and complete this
 second review. Reloading restores the saved global review and revisions.
@@ -410,8 +405,47 @@ approval. The import never edits individual reviews. Local line IDs are used
 for editing and Markdown export; `sourceId` preserves qualified source citations
 and original candidate IDs in the JSON snapshot, alongside the source catalog.
 Global snapshots are second-stage outputs, not new individual extraction inputs.
-The generation command remains a separate agent workflow; importing does not
-start model calls or regenerate candidates in the browser.
+Importing a file does not start model calls; generation runs from **Submit** (below)
+or as a separate agent workflow.
+
+## Submit trajectories and generate cross-session insights
+
+**Submit…** on the review page and the **Submit** page (`/submit`) show the same list:
+every trajectory by project, named by session. Under each
+are the completed versions (redacted or unredacted, from each run that processed the
+session); only one may be checked. Every completed trajectory is checked by default,
+preferring its redacted version; unredacted versions are marked and the form
+warns about them. Completed global insights reviews are listed below and checked too. Trajectories with nothing completed are greyed out with the reason
+(cards still open, not completed) and a link to finish them. Runs of one session are
+matched by session ID or verified input hash.
+
+Submitting saves a frozen copy on this computer and nothing is uploaded:
+
+```
+OXYGEN_HOME/submissions/<id>/
+  submission.json        the submitted reviews, decision counts, suggested worker
+  export/                manifest.json + one folder per review, the cross-session input
+  history/<review>/      history.json and history.md, if you kept the box checked
+  global/<review>/       completed global insights reviews, if checked (not read as trajectories)
+  generations/<job>/     one folder per generation attempt (config, state, run, logs)
+```
+
+The server checks the selection again and refuses it if a review changed after the page
+loaded. Edit history (with the requests you typed to the agent) is kept apart from
+`export/` and never sent to a model; uncheck **Include edit history and agent requests**
+to leave it out. **Download contribution package** zips the frozen files. Later edits do
+not change a submission; the page says which reviews changed and offers to submit again.
+
+**Generate cross-session insights** needs at least two different trajectories. Choose the
+agent, model and reasoning effort (suggested from the runs the trajectories came from);
+the summaries and cards of the submitted trajectories (never `global/` or `history/`)
+are sent to that provider through your own login. The
+service runs `tools/oxygen_run.py cross-session`, which drives the skill's `prepare →
+call → record-worker → accept` steps for the synthesis and readability stages with
+headless workers, at most three hours each. Runs and generations together are limited to
+two at a time. When it finishes, the result is imported as a Global insights review (once,
+however many pages are open) and a banner offers to open it. A failed or stopped attempt
+keeps its folder; **Generate again** starts a new one.
 
 ## Projects, runs and the local service
 
@@ -426,6 +460,8 @@ app reaches it with a random per-start token, so the browser never sees the toke
 | New run | `/runs/new?workspace=PATH` | Choose sessions, language, agent, model and reasoning effort. |
 | Run | `/runs?id=RUN` | Per-session progress with stage timings. **Review** imports the finished session and opens it. |
 | Review | `/review?review=ID` | One card at a time with a Summary tab, the full side-by-side layout and the agent composer. |
+| Submit | `/submit` | Choose labeled trajectories to hand in. |
+| Submissions | `/submissions?id=ID` | A frozen submission: download it, generate cross-session insights, open the result. |
 
 Links of the form `/?review=ID` from earlier versions still open the review.
 
@@ -443,7 +479,7 @@ run arbitrary commands.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OXYGEN_HOME` | `~/.oxygen` | Runs (`runs/`) and the review database (`reviews.sqlite`). |
+| `OXYGEN_HOME` | `~/.oxygen` | Runs (`runs/`), submissions (`submissions/`) and the review database (`reviews.sqlite`). |
 | `OXYGEN_PORT` | `3000` | Port of this app (the next free port is used if busy). |
 | `OXYGEN_CODEX_HOME` | `$CODEX_HOME` or `~/.codex` | Where Codex sessions are read from. |
 | `OXYGEN_CLAUDE_CONFIG_DIR` | `$CLAUDE_CONFIG_DIR` or `~/.claude` | Where Claude Code sessions are read from. |

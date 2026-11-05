@@ -5,7 +5,7 @@ export const historyExportFormat = 'oxygen-review-history/v1';
 
 /**
  * Opt-in files with every saved version of one review: the imported original,
- * browser saves, and assisted-review requests. Contribution artifacts in the same
+ * browser saves, and agent requests. Contribution artifacts in the same
  * bundle stay latest-only; history is private research material.
  */
 export function historyFiles({

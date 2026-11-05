@@ -114,8 +114,9 @@ void test('accepts uncited reviewer cards through revision validation, while kee
     }),
     false,
   );
+  // Either version can be completed once every card is decided.
   assert.equal(
     isValidV5Review({ ...base, privacyStatus: 'unredacted' }, value),
-    false,
+    true,
   );
 });

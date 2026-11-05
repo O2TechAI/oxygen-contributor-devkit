@@ -4,10 +4,13 @@
 import argparse
 from contextlib import contextmanager
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 
@@ -15,6 +18,8 @@ import tempfile
 MAIN_SOURCES = {"cli", "vscode", "exec"}
 CHUNK_SIZE = 1024 * 1024
 HEADER_LIMIT = 1024 * 1024
+# Codex compresses older rollouts in place to rollout-*.jsonl.zst.
+COMPRESSED_SUFFIX = ".jsonl.zst"
 
 
 class CollectionError(Exception):
@@ -50,6 +55,75 @@ def open_source(path):
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise CollectionError("source_not_regular")
         yield stream
+
+
+def is_compressed(path):
+    return Path(path).name.endswith(COMPRESSED_SUFFIX)
+
+
+def _zstd_backend():
+    """The first available zstd decoder: Python 3.14's compression.zstd, zstandard, or the zstd CLI."""
+    try:
+        from compression import zstd
+        return "stdlib", zstd
+    except ImportError:
+        pass
+    try:
+        import zstandard
+        return "zstandard", zstandard
+    except ImportError:
+        pass
+    binary = shutil.which("zstd")
+    if binary:
+        return "cli", binary
+    raise CollectionError("zstd_unavailable")
+
+
+@contextmanager
+def decompressed(stream):
+    """Read a compressed rollout from its start as an uncompressed binary stream."""
+    kind, backend = _zstd_backend()
+    stream.seek(0)
+    process = None
+    if kind == "stdlib":
+        reader, errors = backend.ZstdFile(stream, "rb"), (backend.ZstdError, EOFError)
+    elif kind == "zstandard":
+        reader = io.BufferedReader(backend.ZstdDecompressor().stream_reader(stream, closefd=False))
+        errors = (backend.ZstdError,)
+    else:
+        process = subprocess.Popen([backend, "-dcq"], stdin=stream, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL)
+        reader, errors = process.stdout, ()
+    try:
+        yield reader
+    except errors as exc:
+        raise CollectionError("decompression_failed") from exc
+    finally:
+        reader.close()
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            elif process.returncode != 0:
+                raise CollectionError("decompression_failed")
+
+
+@contextmanager
+def open_records(path):
+    """A session file's records as plain bytes, whether or not Codex compressed it."""
+    with open_source(path) as stream:
+        if is_compressed(path):
+            with decompressed(stream) as plain:
+                yield plain
+        else:
+            yield stream
+
+
+def read_source_metadata(stream, path, observed_bytes):
+    if not is_compressed(path):
+        return read_metadata(stream, observed_bytes)
+    with decompressed(stream) as plain:
+        return read_metadata(plain, HEADER_LIMIT)
 
 
 def read_metadata(stream, observed_bytes):
@@ -153,6 +227,79 @@ def freeze_source(stream, path, initial, metadata, snapshots):
         temporary.unlink(missing_ok=True)
 
 
+def verify_unchanged(stream, path, initial):
+    """A compressed rollout is a finished archive: any change while reading it is an error."""
+    current = os.fstat(stream.fileno())
+    at_path = path.stat(follow_symlinks=False)
+    if not stat.S_ISREG(at_path.st_mode) or _identity(initial) != _identity(at_path):
+        raise CollectionError("source_replaced")
+    for observed in (current, at_path):
+        if (observed.st_size, observed.st_mtime_ns) != (initial.st_size, initial.st_mtime_ns):
+            raise CollectionError("source_modified")
+
+
+def freeze_compressed(stream, path, initial, metadata, snapshots):
+    """Freeze the decompressed, complete records of a compressed rollout."""
+    fd, temp_name = tempfile.mkstemp(prefix=".collect-", dir=snapshots)
+    temporary = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w+b") as destination:
+            os.fchmod(destination.fileno(), 0o600)
+            with decompressed(stream) as plain:
+                shutil.copyfileobj(plain, destination, CHUNK_SIZE)
+            destination.flush()
+            length = _complete_prefix_length(destination, destination.tell())
+            destination.truncate(length)
+            digest = _read_prefix(destination, length)
+            os.fsync(destination.fileno())
+            destination.seek(0)
+            if read_metadata(destination, length) != metadata:
+                raise CollectionError("source_metadata_changed")
+        verify_unchanged(stream, path, initial)
+        name = hashlib.sha256(os.fsencode(str(path))).hexdigest() + ".jsonl"
+        target = snapshots / name
+        os.link(temporary, target)
+        return target, digest, length
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def freeze_any(stream, path, initial, metadata, snapshots):
+    if is_compressed(path):
+        return freeze_compressed(stream, path, initial, metadata, snapshots)
+    return freeze_source(stream, path, initial, metadata, snapshots)
+
+
+def complete_lines(path):
+    """Yield the complete records of a session file, plain or compressed.
+
+    Like freezing, this reads a live file only up to its last complete record at open
+    time and then checks that the file was at most appended to.
+    """
+    with open_source(path) as stream:
+        initial = os.fstat(stream.fileno())
+        if is_compressed(path):
+            with decompressed(stream) as plain:
+                for line in plain:
+                    if line.endswith(b"\n"):
+                        yield line
+            verify_unchanged(stream, path, initial)
+            return
+        length = _complete_prefix_length(stream, initial.st_size)
+        digest = hashlib.sha256()
+        offset, rest = 0, b""
+        while offset < length:
+            block = os.pread(stream.fileno(), min(CHUNK_SIZE, length - offset), offset)
+            if not block:
+                raise CollectionError("source_truncated")
+            digest.update(block)
+            offset += len(block)
+            *lines, rest = (rest + block).split(b"\n")
+            for line in lines:
+                yield line + b"\n"
+        _verify_prefix(stream, path, initial, length, digest.hexdigest())
+
+
 def _error(manifest, path, reason):
     manifest["errors"].append({"source_path": str(path), "reason": reason})
 
@@ -190,7 +337,8 @@ def discover(roots, manifest):
                 if child.is_symlink():
                     dirs.remove(name)
                     _error(manifest, child, "symlink_directory_skipped")
-            paths.extend(Path(directory) / name for name in files if name.endswith(".jsonl"))
+            paths.extend(Path(directory) / name for name in files
+                         if name.endswith(".jsonl") or name.endswith(COMPRESSED_SUFFIX))
     return sorted(set(paths))
 
 
@@ -237,7 +385,7 @@ def collect(workspace, codex_home=None, output_dir=None, dry_run=False):
         try:
             with open_source(path) as stream:
                 initial = os.fstat(stream.fileno())
-                meta = read_metadata(stream, initial.st_size)
+                meta = read_source_metadata(stream, path, initial.st_size)
                 decision = classify(meta, workspace)
                 if decision != "selected":
                     _exclude(manifest, path, decision)
@@ -249,7 +397,7 @@ def collect(workspace, codex_home=None, output_dir=None, dry_run=False):
                 if dry_run:
                     manifest["sessions"].append(entry)
                     continue
-                target, digest, length = freeze_source(stream, path, initial, meta, snapshots)
+                target, digest, length = freeze_any(stream, path, initial, meta, snapshots)
                 location = {"source_path": str(path), "observed_bytes": initial.st_size,
                             "omitted_trailing_bytes": initial.st_size - length}
                 key = (meta["id"], digest, length)

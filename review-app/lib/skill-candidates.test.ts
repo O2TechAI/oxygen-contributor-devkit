@@ -168,7 +168,7 @@ void test('v8 reviewer additions allow absent evidence and preserve prose throug
   );
   assert.equal(
     isValidV5Review({ ...r, privacyStatus: 'unredacted' }, payload),
-    false,
+    true,
   );
 });
 

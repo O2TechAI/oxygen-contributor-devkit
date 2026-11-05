@@ -50,14 +50,20 @@ LANGUAGE_RULES = {
 # Reading guidance differs by host because the file tools and their limits differ.
 HOST_NOTES = {
     "codex": (
-        "Host: Codex `collaboration.spawn_agent` worker. Plan reads that fit both "
-        "`exec_command` and the enclosing `functions.exec` output limits."
+        "Host: Codex worker, either a `collaboration.spawn_agent` subagent or a headless "
+        "`codex exec` process. Codex has no file-reading tool: read files with shell "
+        "commands through `exec_command`. Command output is truncated at about 10,000 tokens "
+        "per call, and an enclosing `functions.exec` call does not raise that limit. Read the "
+        "frozen source only with the supplied source reader, whose parts fit one call; read "
+        "smaller files with commands such as `sed -n` and rerun smaller ranges if output is "
+        "truncated."
     ),
     "claude": (
-        "Host: Claude Code Agent-tool worker with a fresh context. Read the source with "
-        "the Read tool using `offset` and `limit`. Each call returns at most 2000 lines and "
-        "may truncate very long lines or reject a range that is too large; request fewer "
-        "lines, or reread a long line with Bash (for example `sed -n 'Np' FILE | cut -c A-B`). "
+        "Host: Claude Code Agent-tool worker with a fresh context. Read the frozen source only "
+        "with the supplied source reader, run with Bash; each part fits one Bash output. Read "
+        "other files with the Read tool using `offset` and `limit`. Each call returns at most "
+        "2000 lines and may truncate very long lines or reject a range that is too large; request "
+        "fewer lines, or reread a long line with Bash (for example `sed -n 'Np' FILE | cut -c A-B`). "
         "Write output files with Write or Edit, then set mode 0600 with `chmod 600` in Bash. "
         "Run the label helper with Bash. Do not use the Agent, WebFetch, or WebSearch tools. "
         "Your final message is the task result returned to the parent."
@@ -88,6 +94,9 @@ LABEL_SCRIPT = SKILL / "scripts" / "label_summary_lines.py"
 LABEL_SPEC = importlib.util.spec_from_file_location("oxygen_label_summary", LABEL_SCRIPT)
 LABEL = importlib.util.module_from_spec(LABEL_SPEC)
 LABEL_SPEC.loader.exec_module(LABEL)
+# Stages that must read the frozen source do so through this reader, which records each part.
+READER_SCRIPT = SKILL / "scripts" / "read_source.py"
+READING_STAGES = ("summary", "insight")
 
 
 
@@ -137,7 +146,7 @@ def language_block(language):
     return f"# Output language\n\n{LANGUAGE_RULES[language]}\n\n".encode()
 
 
-def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex", language=None):
+def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex", language=None, reader_script=READER_SCRIPT):
     notes = b"# Host notes\n\n" + HOST_NOTES[host].encode() + b"\n\n"
     wrapper = notes + (SKILL / "references" / f"{stage}-worker.md").read_bytes()
     prompt = (HUMANIZER.instructions(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER)) if stage == "humanize"
@@ -156,6 +165,8 @@ def fixed_template(stage, label_script=LABEL_SCRIPT, host="codex", language=None
                 raise RunError("category_reference_unavailable") from exc
             helper += b"\n\n" + categories
         helper += b"\n# Label helper command (JSON argv prefix)\n" + encode([sys.executable, str(label_script)])
+    if stage in READING_STAGES:
+        helper += b"\n# Source reader command (JSON argv prefix)\n" + encode([sys.executable, str(reader_script)])
     return (wrapper + b"\n" + prompt + helper + b"\n\n" + language_block(language)
             + b"# Per-item input (JSON data)\n")
 
@@ -188,6 +199,7 @@ def configuration(host="codex", model=None, effort=None, language=None):
         **({"language": language} if language else {}),
         "helper_sha256": sha(Path(__file__).read_bytes()),
         "labeler_sha256": sha(LABEL_SCRIPT.read_bytes()),
+        "reader_sha256": sha(READER_SCRIPT.read_bytes()),
         "card_parser_sha256": sha(CARD_SCRIPT.read_bytes()),
         "card_format_sha256": sha(CARD_FORMAT.read_bytes()),
         "template_sha256": {stage: sha(fixed_template(stage, host=host, language=language))
@@ -273,8 +285,8 @@ def prepare(value, *, host="codex", model=None, effort=None, language=None):
     config = configuration(host, model, effort, language)
     run.mkdir(mode=0o700)
     run.chmod(0o700)
-    for stage in STAGES:
-        directory = run / stage
+    for name in (*STAGES, "reading"):
+        directory = run / name
         directory.mkdir(mode=0o700)
         directory.chmod(0o700)
     frozen_name = "source.md" if source.suffix.lower() == ".md" else "trajectory.json"
@@ -286,9 +298,11 @@ def prepare(value, *, host="codex", model=None, effort=None, language=None):
     protocol.chmod(0o700)
     snapshots = {"label_summary_lines.py": LABEL_SCRIPT.read_bytes(),
                  "humanizer_protocol.py": HUMANIZER_SCRIPT.read_bytes(),
-                 "insight_cards.py": CARD_SCRIPT.read_bytes()}
+                 "insight_cards.py": CARD_SCRIPT.read_bytes(),
+                 "read_source.py": READER_SCRIPT.read_bytes()}
     snapshots.update(HUMANIZER.bundle(HUMANIZER_ROOT, HUMANIZER_WRAPPER))
-    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host, language)
+    snapshots.update({f"{stage}-template.md": fixed_template(stage, protocol / LABEL_SCRIPT.name, host, language,
+                                                             protocol / READER_SCRIPT.name)
                       for stage in STAGES})
     for name, content in snapshots.items():
         (protocol / name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -346,6 +360,23 @@ def run_helper(run, name):
     module = types.ModuleType(name)
     exec(compile(read_regular(path), str(path), "exec"), module.__dict__)
     return module
+
+
+def check_reading(run, manifest, stage):
+    """Require a receipt for every source part, when the run was prepared with the reader.
+
+    Runs prepared before the reader existed keep their worker's own completion report.
+    """
+    if stage not in READING_STAGES or "read_source.py" not in manifest["protocol_sha256"]:
+        return None
+    reader = run_helper(run, "read_source.py")
+    data = read_regular(run / manifest["frozen_file"])
+    bounds = reader.parts(data)
+    seen = reader.receipts(run, stage)
+    read = sum(1 for number, (start, end) in enumerate(bounds, 1) if seen.get(number) == sha(data[start:end]))
+    if read != len(bounds):
+        raise RunError(f"source_not_fully_read: {read} of {len(bounds)} parts")
+    return len(bounds)
 
 
 def validate_outputs(run, stage):
@@ -550,6 +581,7 @@ def accept(value, stage, *, worker_id=None, worker_status=None):
         if state["status"] == "complete":
             return {"stage": stage, "status": "complete", **state["outputs"],
                     "run_complete": manifest["complete"]}
+        parts = check_reading(run, manifest, stage)
         if stage == "summary":
             prepare_summary_labels(run)
         try:
@@ -559,6 +591,8 @@ def accept(value, stage, *, worker_id=None, worker_status=None):
                 state.update(status="failed", worker_status=worker_status, error="invalid_humanizer_output")
                 save_manifest(run, manifest)
             raise
+        if parts is not None:
+            outputs["source_parts_read"] = parts
         state.update(status="complete", worker_status=worker_status, outputs=outputs)
         manifest["complete"] = stage == "redaction" or manifest["complete"]
         save_manifest(run, manifest)

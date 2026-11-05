@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Send } from 'lucide-react';
 
 import { InsightCard } from '@/components/insight-card';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ export function ReviewQueue({
   onNext,
   onOpenEvidence,
   onComplete,
+  onSubmit,
   tab,
   onTabChange,
   summary,
@@ -62,6 +63,8 @@ export function ReviewQueue({
   onNext: () => void;
   onOpenEvidence: (lineId: string) => void;
   onComplete: () => void;
+  /** Opens the Submit panel; shown once the review is completed. */
+  onSubmit?: () => void;
   tab: 'insights' | 'summary';
   onTabChange: (tab: 'insights' | 'summary') => void;
   /** The same Summary the side-by-side layout shows, with the card's evidence highlighted. */
@@ -141,11 +144,18 @@ export function ReviewQueue({
           {remaining === 0 && (
             <output className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[6px] bg-[color:var(--ui-callout)] px-4 py-3 text-sm">
               <span>Every card is reviewed.</span>
-              {review.status !== 'completed' && (
+              {review.status !== 'completed' ? (
                 <Button size="sm" disabled={!completable} onClick={onComplete}>
                   <Check data-icon="inline-start" />
                   Complete
                 </Button>
+              ) : (
+                onSubmit && (
+                  <Button size="sm" variant="outline" onClick={onSubmit}>
+                    <Send data-icon="inline-start" />
+                    Submit…
+                  </Button>
+                )
               )}
             </output>
           )}

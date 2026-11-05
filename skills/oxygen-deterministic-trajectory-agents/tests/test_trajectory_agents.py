@@ -67,12 +67,22 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.source.write_bytes(self.original)
         _, self.run = RUN.paths(self.source)
 
+    def read_all(self, stage, source=None):
+        """Read every source part through the run's reader, as a worker would."""
+        run = RUN.paths(source)[1] if source else self.run
+        if stage in RUN.READING_STAGES and (run / "protocol" / "read_source.py").exists():
+            reader = RUN.run_helper(run, "read_source.py")
+            for number in range(1, len(reader.parts(reader.frozen_source(run).read_bytes())) + 1):
+                reader.read_part(run, stage, number)
+
     def accept(self, source, stage):
         _, run = RUN.paths(source)
         state = json.loads((run / "manifest.json").read_bytes())["stages"].get(stage, {})
         worker_id = "test-" + stage
         if state.get("status") in {"issued", "complete"} and not state.get("origin"):
             RUN.record_worker(source, stage, worker_id)
+        if state.get("status") == "issued":
+            self.read_all(stage, source)
         return RUN.accept(source, stage, worker_id=worker_id, worker_status="complete")
 
     def write_summary(self, summary=SUMMARY):
@@ -133,7 +143,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.assertIn("prompt", RUN.issue_call(self.source, "insight"))
 
     def test_codex_host_notes_keep_exec_limits_and_defaults_are_unchanged(self):
-        self.assertIn(b"`functions.exec` output limits", RUN.fixed_template("summary"))
+        self.assertIn(b"truncated at about 10,000 tokens", RUN.fixed_template("summary"))
         self.assertEqual(RUN.configuration()["model"], "gpt-6.1-sol")
         self.assertEqual(RUN.configuration()["reasoning_effort"], "high")
         self.assertNotIn("language", RUN.configuration())
@@ -184,6 +194,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         events = []
         async def dispatch(arguments):
             stage = arguments["task_name"].split("_")[1]
+            self.read_all(stage)
             if stage == "summary":
                 self.write_summary()
             elif stage == "insight":
@@ -284,7 +295,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         results = []
         for stage in ("insight", "redaction"):
             template = RUN.fixed_template(stage).decode()
-            encoded = template.split("# Label helper command (JSON argv prefix)\n")[1].split("# Per-item input")[0]
+            encoded = template.split("# Label helper command (JSON argv prefix)\n")[1].split("\n# ")[0]
             prefix = json.loads(encoded)
             destination = self.root / f"{stage}-labeled.md"
             subprocess.run(prefix + [str(source), str(destination)], check=True, capture_output=True)
@@ -624,7 +635,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         with patch.object(RUN.LABEL, "label_file", side_effect=AssertionError("use snapshot")):
             self.accept(self.source, "summary")
         call = RUN.issue_call(self.source, "insight")
-        prefix = json.loads(call["message"].split("# Label helper command (JSON argv prefix)\n")[1].split("# Per-item input")[0])
+        prefix = json.loads(call["message"].split("# Label helper command (JSON argv prefix)\n")[1].split("\n# ")[0])
         self.assertEqual(prefix, ["python3", str(self.run / "protocol/label_summary_lines.py")])
         (self.run / "insight/insight.md").write_text(INSIGHTS)
         with patch.object(RUN.CARDS, "parse_cards", side_effect=AssertionError("use snapshot")):
@@ -649,6 +660,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         with self.assertRaisesRegex(RUN.RunError, "worker_id_mismatch"):
             RUN.record_worker(self.source, "summary", "different")
         (self.run / "summary-call.json").unlink()
+        self.read_all("summary")
         self.assertEqual(RUN.accept(self.source, "summary", worker_id="actual", worker_status="complete")["status"], "complete")
 
     def test_existing_runs_locks_and_symlinks_are_refused(self):
@@ -693,6 +705,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
             events.append(("wait", stage))
             if stage == failed_stage:
                 return {"status": "error"}
+            self.read_all(stage)
             if stage == "summary":
                 self.write_summary("" if stage == invalid_stage else SUMMARY)
             elif stage in {"insight", "humanize"}:
@@ -941,6 +954,9 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.assertNotEqual(cli("accept-summary", self.source).returncode, 0)
         self.assertEqual(cli("record-worker", self.source, "--stage", "summary", "--worker-id", "host-summary").returncode, 0)
         self.assertNotEqual(cli("accept-summary", self.source, "--worker-id", "host-summary", "--worker-status", "error").returncode, 0)
+        unread = cli("accept-summary", self.source, "--worker-id", "host-summary", "--worker-status", "complete")
+        self.assertIn("source_not_fully_read: 0 of 1 parts", unread.stderr)
+        self.read_all("summary")
         result = cli("accept-summary", self.source, "--worker-id", "host-summary", "--worker-status", "complete")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["summary_lines"], 1)

@@ -121,38 +121,35 @@ The collection and stripping steps are standalone Python tools; skills handle th
   `strip_claude_tool_outputs.py`, `claude_trajectory_markdown.py`).
 - `skills/oxygen-deterministic-trajectory-agents/` — summary, insight, Humanizer, and privacy-redaction workers.
 - `skills/oxygen-cross-session-generation/` — infer shared reusable skill candidates from completed review exports.
-- `skills/oxygen-assisted-review/` — conversational review edits, request snapshots, and explicit privacy cleanup.
 - `review-app/` — the Oxygen human-review service and evidence-linked review UI.
 
 ### Edit insights with an agent
 
-When a contributor asks an agent to rewrite, add, remove, comment on, or label
-insights in the open review, use the
-[assisted-review skill](skills/oxygen-assisted-review/SKILL.md). It saves each
-request and resulting snapshot, then reloads the review with an in-page diff.
-Insight rewrites and additions use the local Humanizer within the editing agent,
-grounded in the current summary and preserving defining requirements.
-Explicit privacy requests discard earlier managed history and source-linked
-receipts, saving the sanitized result as a new `0000` baseline. The agent
-automatically refreshes or opens the saved review; ordinary deletions remain
-recorded edits.
-
-```text
-Use ./skills/oxygen-assisted-review/SKILL.md to edit the current review. Make the selected insight easier to read, save my request and the resulting snapshot, and show the changes in the review page.
-```
-
-The example starts from the toolkit root. Keep review archives outside Git in
-your configured run storage. Helper file arguments accept relative paths;
-temporary storage follows the system default or `TMPDIR`.
+The review page's agent bar (**Ask** / **Edit**) asks the Codex or Claude Code
+installed on this computer about the open review or revises its cards. Every request
+is saved in the review's history: an edit with the full request and the agent's
+explanation, a question with its answer. A request to remove, anonymize or redact
+information is a privacy request: after a warning, the cleaned review replaces the
+current one, every earlier saved version (with its requests) is deleted, and the
+cleaned version becomes the new starting version. See
+[`review-app/README.md`](review-app/README.md#ask-or-edit-with-your-own-agent).
 
 ### Generate cross-session candidates after review
 
-After labeling and exporting a collection, use the
+In the review app, **Submit** lists every trajectory with completed redacted reviews
+checked. Uncheck any to keep out, submit to freeze a private copy under
+`OXYGEN_HOME/submissions/`, then optionally choose **Generate cross-session insights**
+with the agent, model and effort you want. The result opens as a Global insights
+review when it finishes.
+
+Outside the app, use the
 [cross-session generation skill](skills/oxygen-cross-session-generation/SKILL.md)
-with its extracted export directory. It reads final edited summaries and both
+with an extracted export directory. It reads final edited summaries and both
 accepted and declined cards, validates completed labeling, and launches a fresh
-`gpt-6.1-sol` synthesis worker with high reasoning, followed by a fresh Humanizer
-worker. The latter edits explanations without changing candidate selection or citations. Each new candidate needs concrete support
+synthesis worker, followed by a fresh Humanizer worker. The worker agent, model and
+effort are yours to choose (`prepare --host/--model/--effort`, or
+`OXYGEN_WORKER_HOST/MODEL/EFFORT`); without a choice, Codex uses `gpt-6.1-sol` with
+high reasoning. The latter edits explanations without changing candidate selection or citations. Each new candidate needs concrete support
 from at least two distinct trajectories. Results are private drafts with qualified
 summary citations and source decisions; they require a new human review and do
 not modify existing reviews or create installable skills.
@@ -669,13 +666,13 @@ actual protocol version, including v9; the review format's internal name `v5`
 does not restrict imports to protocol 5. These checks do not establish semantic
 support or complete privacy protection.
 
-The review UI preserves generated originals and human revisions. Explicit privacy
-cleanup can sanitize those saved copies through the assisted-review skill.
+The review UI preserves generated originals and human revisions. A privacy
+request in the agent bar replaces those saved copies with the cleaned version.
 Selecting evidence opens and highlights its Summary line. Summary edits invalidate
 affected approvals, and only a redacted review with every Insight accepted or
 rejected can be completed. Export produces a bundle containing reviewed Summary,
 labeled Summary, Insights, provenance, and decisions. Request history stays in
-the private assisted-review archive rather than contribution exports. For research
+the review's private history rather than contribution exports. For research
 use, the reviewer can opt in to an export with edit history, which adds every
 saved version, request notes, and diffs; see
 [`review-app/README.md`](review-app/README.md#edit-history-export). The launch

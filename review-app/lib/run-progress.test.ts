@@ -7,6 +7,7 @@ import {
   describeError,
   formatBytes,
   formatDuration,
+  insightStepState,
   runCounts,
   runFraction,
   stepState,
@@ -112,4 +113,35 @@ void test('known error codes become sentences and unknown ones pass through', ()
     /stopped with an error/,
   );
   assert.equal(describeError('something else'), 'something else');
+});
+
+void test('a cross-session job moves through preparing, synthesis and readability', () => {
+  const job = {
+    id: 'j',
+    submissionId: 's',
+    host: 'codex' as const,
+    model: 'm',
+    effort: 'high',
+    stage: null,
+  };
+  const states = (extra: object) =>
+    (['prepare', 'synthesis', 'humanize'] as const).map((step) =>
+      insightStepState({ ...job, phase: 'preparing', ...extra }, step),
+    );
+  assert.deepEqual(states({}), ['active', 'waiting', 'waiting']);
+  assert.deepEqual(states({ phase: 'generating', stage: 'synthesis' }), [
+    'done',
+    'active',
+    'waiting',
+  ]);
+  assert.deepEqual(
+    states({ phase: 'failed', stage: 'humanize', stagesDone: ['synthesis'] }),
+    ['done', 'done', 'failed'],
+  );
+  assert.deepEqual(states({ phase: 'failed' }), [
+    'failed',
+    'waiting',
+    'waiting',
+  ]);
+  assert.deepEqual(states({ phase: 'done' }), ['done', 'done', 'done']);
 });

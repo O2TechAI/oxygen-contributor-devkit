@@ -29,6 +29,9 @@ function isContext(value: unknown): value is AgentContext {
   const context = value as Partial<AgentContext>;
   return (
     typeof context.protocolVersion === 'number' &&
+    (context.projectName === undefined ||
+      (typeof context.projectName === 'string' &&
+        context.projectName.length <= 200)) &&
     Array.isArray(context.summaryLines) &&
     context.summaryLines.every(
       (line) =>

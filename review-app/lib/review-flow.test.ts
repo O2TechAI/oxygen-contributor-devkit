@@ -168,6 +168,28 @@ void test('imports, edits, saves, exports and reimports paragraph Takeaways with
     true,
     'Trash can delete a card independently of the decline decision.',
   );
+  assert.equal(
+    isValidV5Review(
+      { ...review, privacyStatus: 'unredacted' },
+      {
+        ...review,
+        insights: review.insights.slice(0, 2),
+        note: 'Completed the unredacted version.',
+        status: 'completed',
+      },
+    ),
+    true,
+    'An unredacted version can be completed once every card is decided.',
+  );
+  assert.equal(
+    isValidV5Review(review, {
+      ...review,
+      note: 'Completed too early.',
+      status: 'completed',
+    }),
+    false,
+    'A card without a decision blocks completion.',
+  );
   await saveRevision(review.id, {
     ...review,
     note: 'Synthetic Markdown edit.',

@@ -38,6 +38,14 @@ Check host support before dispatch and use the helper-generated arguments
 unchanged. Each stage gets a fresh worker. The generated prompt begins with host
 notes describing that host's file-reading tools and limits.
 
+The summary and insight workers read the frozen source only through the run's
+saved `protocol/read_source.py`. It cuts the source into fixed parts of at most
+16,000 bytes, small enough for one Codex command output (about 10,000 tokens) or
+one Claude Code Bash output, prints one part per call, and records a receipt in
+`reading/<stage>.jsonl`. Accepting either stage recomputes the parts and requires
+a receipt for every one (`source_not_fully_read: N of M parts` otherwise). Runs
+prepared before the reader existed keep the worker's own completion report.
+
 Initialization saves the model settings, complete prompt templates, labeler, and
 card parser in the run. The insight template also embeds the shared
 [category criteria and examples](../../prompts/insight_categories.md), used for

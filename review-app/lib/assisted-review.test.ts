@@ -261,19 +261,23 @@ void test('assisted review saves and sanitizes isolated history atomically', asy
     'privacy replaces all originals, history and source receipts with one new baseline',
     async () => {
       privacyInput = resetPayload(review);
+      const previous = review;
       const result = await api.sanitizeReviewHistory(review.id, privacyInput);
       review = result.review;
       assert.notEqual(review.id, oldId);
       assert.match(review.id, /^review-[0-9a-f-]{36}$/);
       assert.equal(review.version, 0);
       assert.equal(review.revisionCount, 0);
-      assert.equal(review.privacyEpoch, 0);
+      // Marks a cleaned review; its history starts again at version 0.
+      assert.equal(review.privacyEpoch, 1);
       assert.equal(review.insights[0].status, 'pending');
       assert.deepEqual(review.provenance, {
         hashVerified: false,
         runComplete: false,
       });
-      assert.equal(review.sourcePath, `review:${review.id}`);
+      // The trajectory identity (not content) is kept so the review stays in place.
+      assert.equal(review.sourcePath, previous.sourcePath);
+      assert.equal(review.stage, previous.stage);
       const history = await api.getReviewHistory(review.id);
       assert.equal(history.snapshots.length, 1);
       assert.equal(history.snapshots[0].kind, 'initial');
@@ -449,6 +453,16 @@ void test('assisted review saves and sanitizes isolated history atomically', asy
       supported = (await api.sanitizeReviewHistory(supported.id, explicit))
         .review;
       assert.equal(supported.insights[0].status, 'accepted');
+      // Deleting a sensitive card renumbers the rest; their decisions stay.
+      const deletion = resetPayload(supported);
+      const [, kept] = deletion.state.insights;
+      deletion.state.insights = [{ ...kept, id: 'I001', sourceId: kept.id }];
+      supported = (await api.sanitizeReviewHistory(supported.id, deletion))
+        .review;
+      assert.deepEqual(
+        supported.insights.map((c) => [c.id, c.status, c.description]),
+        [['I001', 'accepted', 'Independent method.']],
+      );
     },
   );
   await t.test(

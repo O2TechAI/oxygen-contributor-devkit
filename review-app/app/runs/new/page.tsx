@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 
+import { AgentChoiceFields } from '@/components/agent-choice-fields';
 import { AppShell } from '@/components/oxygen/app-shell';
 import { ServiceNotice } from '@/components/oxygen/service-notice';
 import { Segmented } from '@/components/segmented';
@@ -13,7 +14,6 @@ import {
   readSavedChoice,
   resolveChoice,
   saveChoice,
-  SIGN_IN,
   type AgentChoice,
   type Capabilities,
 } from '@/lib/agent-capabilities';
@@ -29,8 +29,6 @@ import { cn } from '@/lib/utils';
 
 const LANGUAGE_KEY = 'oxygen-run-language';
 const SOURCE_LABEL = { codex: 'Codex', claude: 'Claude Code' } as const;
-const selectClass =
-  'h-8 w-full cursor-pointer rounded-[4px] border border-[color:var(--input)] bg-background px-2 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50';
 
 function initialLanguage(): RunLanguage {
   try {
@@ -162,27 +160,6 @@ function NewRun() {
     saveChoice(next);
   }
 
-  function chooseProvider(id: AgentChoice['provider']) {
-    const provider = providers.find((item) => item.id === id);
-    const first = provider?.models[0];
-    update({
-      provider: id,
-      model: first?.id ?? '',
-      effort: first?.defaultEffort ?? '',
-    });
-  }
-
-  function chooseModel(id: string) {
-    const model = resolved.provider?.models.find((item) => item.id === id);
-    update({
-      provider: choice.provider,
-      model: id,
-      effort: model?.efforts.includes(resolved.effort ?? '')
-        ? (resolved.effort ?? '')
-        : (model?.defaultEffort ?? ''),
-    });
-  }
-
   async function start() {
     if (!canStart || !resolved.provider || !resolved.model || !resolved.effort)
       return;
@@ -291,7 +268,8 @@ function NewRun() {
                       const key = keyOf(item);
                       return (
                         <li key={key}>
-                          <label className="flex w-full cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-[color:var(--ui-hover)]">
+                          {/* relative: the visually hidden checkbox must scroll with its row; otherwise focusing it scrolls the page to empty space below the list. */}
+                          <label className="relative flex w-full cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-[color:var(--ui-hover)]">
                             <input
                               type="checkbox"
                               className="peer sr-only"
@@ -361,101 +339,12 @@ function NewRun() {
               title="Agent"
               hint={`${providerLabel} runs on this computer with your own login and does the writing.`}
             >
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="run-agent"
-                    className="block text-xs text-muted-foreground"
-                  >
-                    Agent
-                  </label>
-                  <select
-                    id="run-agent"
-                    className={selectClass}
-                    value={resolved.provider?.id ?? choice.provider}
-                    disabled={capabilities.state !== 'ready'}
-                    onChange={(event) =>
-                      chooseProvider(
-                        event.target.value as AgentChoice['provider'],
-                      )
-                    }
-                  >
-                    {(providers.length
-                      ? providers
-                      : [
-                          { id: 'codex', label: 'Codex' },
-                          { id: 'claude', label: 'Claude' },
-                        ]
-                    ).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="run-model"
-                    className="block text-xs text-muted-foreground"
-                  >
-                    Model
-                  </label>
-                  <select
-                    id="run-model"
-                    className={selectClass}
-                    value={resolved.model?.id ?? ''}
-                    disabled={!resolved.usable}
-                    onChange={(event) => chooseModel(event.target.value)}
-                  >
-                    {(resolved.provider?.models ?? []).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="run-effort"
-                    className="block text-xs text-muted-foreground"
-                  >
-                    Reasoning effort
-                  </label>
-                  <select
-                    id="run-effort"
-                    className={selectClass}
-                    value={resolved.effort ?? ''}
-                    disabled={!resolved.usable}
-                    onChange={(event) =>
-                      update({
-                        provider: choice.provider,
-                        model: resolved.model?.id ?? '',
-                        effort: event.target.value,
-                      })
-                    }
-                  >
-                    {(resolved.model?.efforts ?? []).map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {capabilities.state === 'off' && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  The agents could not be detected because the Oxygen service is
-                  not running.
-                </p>
-              )}
-              {capabilities.state === 'ready' && !resolved.usable && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  No agent is ready. Sign in with{' '}
-                  <code className="font-mono text-xs">{SIGN_IN.codex}</code> or{' '}
-                  <code className="font-mono text-xs">{SIGN_IN.claude}</code>,
-                  then reload.
-                </p>
-              )}
+              <AgentChoiceFields
+                id="run"
+                capabilities={capabilities}
+                choice={choice}
+                onChange={update}
+              />
             </Section>
 
             <div className="mt-10 flex flex-wrap items-center gap-4 border-t pt-5">

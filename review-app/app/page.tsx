@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { AppShell } from '@/components/oxygen/app-shell';
+import { useInsightJobsContext } from '@/hooks/use-insight-jobs';
 import { ServiceNotice } from '@/components/oxygen/service-notice';
 import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,11 @@ import { isUndecided } from '@/lib/review-queue';
 import type { Review } from '@/lib/review-types';
 import { visibleReviews } from '@/lib/trajectory-list';
 import { isActivePhase, phaseText, timeAgo } from '@/lib/run-progress';
+import {
+  changedSinceSubmission,
+  defaultSubmissionSelection,
+  submissionRows,
+} from '@/lib/submission';
 import { cn } from '@/lib/utils';
 
 const FIRST_PAGE = 12;
@@ -137,6 +143,7 @@ function Projects() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const jobs = useInsightJobsContext();
 
   useEffect(() => {
     // Review links from earlier versions pointed at the home address.
@@ -202,6 +209,18 @@ function Projects() {
     };
   }, [reviews]);
 
+  // Labeled trajectories not yet in any submission (or edited since).
+  const unsubmitted = useMemo(() => {
+    const submitted = (jobs?.submissions ?? []).flatMap((item) => item.reviews);
+    const stale = new Set(changedSinceSubmission(submitted, reviews));
+    const handedIn = new Set(
+      submitted.map((item) => item.reviewId).filter((id) => !stale.has(id)),
+    );
+    return defaultSubmissionSelection(submissionRows(reviews, runs)).filter(
+      (id) => !handedIn.has(id),
+    ).length;
+  }, [jobs?.submissions, reviews, runs]);
+
   const matching = useMemo(() => {
     const query = filter.trim().toLowerCase();
     return (workspaces ?? []).filter(
@@ -238,6 +257,22 @@ function Projects() {
           </div>
         )}
 
+        {unsubmitted > 0 && jobs?.submissions && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[6px] border px-4 py-3 text-sm">
+            <span>
+              {unsubmitted} labeled{' '}
+              {unsubmitted === 1 ? 'trajectory is' : 'trajectories are'} not
+              submitted yet
+            </span>
+            <Link
+              href="/submit"
+              className={cn(buttonVariants({ size: 'sm', variant: 'outline' }))}
+            >
+              Review and submit
+            </Link>
+          </div>
+        )}
+
         {unavailable ? (
           <ServiceNotice reason={unavailable} />
         ) : error ? (
@@ -259,6 +294,51 @@ function Projects() {
                   {recent.map((run) => (
                     <RunRow key={run.id} run={run} />
                   ))}
+                </ul>
+              </section>
+            )}
+
+            {(jobs?.submissions?.length ?? 0) > 0 && (
+              <section className="mt-8" aria-labelledby="recent-submissions">
+                <h2
+                  id="recent-submissions"
+                  className="mb-2 text-sm font-medium"
+                >
+                  Recent submissions
+                </h2>
+                <ul className="divide-y rounded-[6px] border bg-card">
+                  {jobs!.submissions!.slice(0, 3).map((item) => {
+                    const latest = item.jobs[0];
+                    return (
+                      <li key={item.id}>
+                        <Link
+                          href={`/submissions?id=${item.id}`}
+                          className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm transition-colors hover:bg-[color:var(--ui-hover)]"
+                        >
+                          <span className="min-w-0 truncate">
+                            {item.reviews.length}{' '}
+                            {item.reviews.length === 1
+                              ? 'trajectory'
+                              : 'trajectories'}
+                            <span className="text-muted-foreground">
+                              {' '}
+                              · {item.projects.join(', ')}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {latest
+                              ? isActivePhase(latest.phase)
+                                ? 'Generating insights'
+                                : latest.phase === 'done'
+                                  ? 'Insights generated'
+                                  : phaseText(latest.phase)
+                              : 'Submitted'}{' '}
+                            · {timeAgo(item.createdAt)}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             )}

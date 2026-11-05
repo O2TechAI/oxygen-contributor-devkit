@@ -865,8 +865,20 @@ export async function sanitizeReviewHistory(
     );
   const review = mapReview(row);
   validateState(review, supplied, '');
+  // Compare cards by their original identity, which survives the renumbering
+  // after a deletion; the stored baseline then drops that mapping.
+  const keyed = (state: ReviewState): ReviewState => {
+    const clean = privacyBaseline(state);
+    return {
+      ...clean,
+      insights: clean.insights.map((card, index) => ({
+        ...card,
+        sourceId: state.insights[index].sourceId ?? state.insights[index].id,
+      })),
+    };
+  };
   const current = privacyBaseline(
-    currentPrivacyState(privacyBaseline(stateFor(review)), baseline),
+    currentPrivacyState(keyed(stateFor(review)), keyed(supplied)),
   );
   if (approved.some((id) => !current.insights.some((card) => card.id === id)))
     throw new ReviewWriteError(
@@ -888,8 +900,11 @@ export async function sanitizeReviewHistory(
     reviewLevel: review.reviewLevel,
     format: review.format,
     protocolVersion: review.protocolVersion,
-    stage: 'historical',
+    // The stage and source path name the trajectory (run, number, version), not
+    // its content, so the cleaned review keeps its place among trajectories.
+    stage: review.stage,
     privacyStatus: review.privacyStatus,
+    // Import hashes describe the content before cleanup and are not retained.
     provenance: { hashVerified: false, runComplete: false },
   };
   const [summary, insights, content] = columnsFor(current, hierarchy);
@@ -902,11 +917,11 @@ export async function sanitizeReviewHistory(
       original_summary_json, original_insights_json, original_hierarchy_json,
       current_summary_json, current_insights_json, current_hierarchy_json,
       created_at, updated_at, version, privacy_epoch, initial_status)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ? FROM reviews WHERE id = ? AND version = ?`)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ? FROM reviews WHERE id = ? AND version = ?`)
       .bind(
         id,
         payload.projectName,
-        `review:${id}`,
+        review.sourcePath,
         current.status,
         now,
         summary,

@@ -24,11 +24,14 @@ function list(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw new Error('Invalid global review list.');
   return value;
 }
-export function globalImportPayload(value: unknown): ReviewCreatePayload {
+export function globalImportPayload(
+  value: unknown,
+  { sourcePath = 'cross-session-candidates' }: { sourcePath?: string } = {},
+): ReviewCreatePayload {
   const data = object(value);
   return {
     projectName: 'Global insights',
-    sourcePath: 'cross-session-candidates',
+    sourcePath,
     format: 'global',
     protocolVersion: 9,
     stage: 'insight',
@@ -129,8 +132,10 @@ export async function parseGlobalReview(payload: ReviewCreatePayload) {
     const values = Object.fromEntries(
       fields.map((key) => [key, text(card[key])]),
     );
+    // Each card is checked on its own, so it is parsed as the first card (I001)
+    // and given its place in the review afterwards.
     const markdown =
-      `# ${id}\n\n` +
+      `# I001\n\n` +
       fields
         .map(
           (key) =>
@@ -146,6 +151,7 @@ export async function parseGlobalReview(payload: ReviewCreatePayload) {
       throw new Error('Global card fields change structure.');
     return {
       ...parsed[0],
+      id,
       sourceId: card.id as string,
       status: 'pending' as const,
     };

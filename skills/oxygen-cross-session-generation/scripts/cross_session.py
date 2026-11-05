@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -16,8 +17,25 @@ sys.dont_write_bytecode = True
 from cross_cards import parse_cards
 from review_exports import normalize_export
 
+# Defaults only; the user's choice (prepare flags, else OXYGEN_WORKER_* variables) wins.
 MODEL = "gpt-6.1-sol"
 EFFORT = "high"
+CLAUDE_MODEL = "opus"
+HOSTS = ("codex", "claude")
+EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Worker prompts describe Codex tools; a Claude Code worker gets these notes first.
+CLAUDE_HOST_NOTES = (
+    "# Host notes\n\n"
+    "Host: Claude Code worker with a fresh context (`claude -p` or the Agent tool). Run the "
+    "helper commands given under \"This run\" (`readCommand`, `checkCommand`) with Bash, "
+    "exactly as given. Choose `--limit` of at most 20000 bytes so each read fits one Bash "
+    "output; wherever these instructions mention Codex `exec_command` or `functions.exec` "
+    "output limits, apply this limit instead. Read other run files with the Read tool using "
+    "`offset` and `limit`. Write output files with Write, then set mode 0600 with "
+    "`chmod 600` in Bash. Do not use the Agent, WebFetch, or WebSearch tools. Your final "
+    "message is the task result returned to the parent.\n\n"
+)
 FORMAT = "oxygen-cross-session-candidates/v2"
 SKILL = Path(__file__).resolve().parents[1]
 CATEGORY_REFERENCE = SKILL.parents[1] / "prompts" / "insight_categories.md"
@@ -103,7 +121,43 @@ def private_relative(root, name):
     return target
 
 
-def prepare(input_dir, run):
+def worker_settings(host=None, model=None, effort=None):
+    """The worker agent, model and reasoning effort the user chose.
+
+    Explicit values win, then OXYGEN_WORKER_HOST / OXYGEN_WORKER_MODEL / OXYGEN_WORKER_EFFORT,
+    then the defaults. Codex runs without a choice keep exactly the earlier settings.
+    """
+    host = host or os.environ.get("OXYGEN_WORKER_HOST") or "codex"
+    model = model or os.environ.get("OXYGEN_WORKER_MODEL") or None
+    effort = effort or os.environ.get("OXYGEN_WORKER_EFFORT") or None
+    if host not in HOSTS:
+        raise ValueError("unsupported_worker_host: use codex or claude")
+    if model is not None and not MODEL_PATTERN.fullmatch(model):
+        raise ValueError("invalid_worker_model")
+    if effort is not None and effort not in EFFORTS:
+        raise ValueError("invalid_worker_effort: use " + ", ".join(EFFORTS))
+    if host == "codex":
+        return {"model": model or MODEL, "reasoning_effort": effort or EFFORT, "fork_turns": "none"}
+    return {"host": "claude", "model": model or CLAUDE_MODEL,
+            **({"reasoning_effort": effort} if effort else {})}
+
+
+def dispatch_args(settings, tag, stage, message):
+    """Arguments for the host's worker tool: Codex spawn_agent, or Claude Code's Agent tool."""
+    if settings.get("host") == "claude":
+        return {"description": f"Oxygen cross-session {stage} {tag[:8]}",
+                "subagent_type": "general-purpose", "model": settings["model"],
+                "run_in_background": True,
+                **({"reasoning_effort": settings["reasoning_effort"]} if "reasoning_effort" in settings else {}),
+                "prompt": message}
+    suffix = "_humanize" if stage == "humanize" else ""
+    return {"task_name": "oxygen_cross_session_" + tag + suffix, "model": settings["model"],
+            "reasoning_effort": settings["reasoning_effort"], "fork_turns": "none", "message": message}
+
+
+def prepare(input_dir, run, *, host=None, model=None, effort=None):
+    worker = worker_settings(host, model, effort)
+    notes = CLAUDE_HOST_NOTES if worker.get("host") == "claude" else ""
     input_dir = Path(input_dir).absolute()
     run = Path(run).absolute()
     if run.exists() or run.is_symlink():
@@ -147,8 +201,7 @@ def prepare(input_dir, run):
         for name, data in humanizer.items():
             write(run / "protocol/references" / name, data)
         write(run / "protocol/humanizer-instructions.md", HUMANIZER.instructions(humanizer))
-        settings = {"model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none",
-                    "format": FORMAT, "privacyStatus": "private-awaiting-review",
+        settings = {**worker, "format": FORMAT, "privacyStatus": "private-awaiting-review",
                     "stageOrder": ["synthesis", "humanize"]}
         write(run / "config.json", settings)
         reading = []
@@ -168,7 +221,7 @@ def prepare(input_dir, run):
             reading.append(entry)
         write(run / "reading" / "index.json", {"sources": reading, "counts": corpus["counts"]})
         helper = run / "protocol" / "scripts" / "cross_session.py"
-        prompt = regular(run / "protocol" / "references" / "synthesis-worker.md").decode()
+        prompt = notes + regular(run / "protocol" / "references" / "synthesis-worker.md").decode()
         prompt += "\n\n## This run\n\n" + json.dumps({
             "runDirectory": str(run), "index": str(run / "reading/index.json"),
             "formatInstructions": str(run / "protocol/references/candidate-format.md"),
@@ -180,12 +233,12 @@ def prepare(input_dir, run):
             "checkCommand": [sys.executable, str(helper), "check", str(run)],
         }, indent=2) + "\n"
         write(run / "protocol" / "worker-prompt.md", prompt.encode())
-        call = {"task_name": "oxygen_cross_session_" + digest(str(run).encode())[:12],
-                "model": MODEL, "reasoning_effort": EFFORT, "fork_turns": "none",
-                "message": "Read and follow the complete frozen worker instructions at "
-                           + str(run / "protocol/worker-prompt.md")
-                           + ". This file is your delegated task. Use only its supplied evidence corpus; "
-                             "write outputs only in its run directory. Return its required final status."}
+        tag = digest(str(run).encode())[:12]
+        call = dispatch_args(worker, tag, "synthesis",
+                             "Read and follow the complete frozen worker instructions at "
+                             + str(run / "protocol/worker-prompt.md")
+                             + ". This file is your delegated task. Use only its supplied evidence corpus; "
+                               "write outputs only in its run directory. Return its required final status.")
         write(run / "dispatch.json", call)
         summary_index = {"files": [item for entry in reading for item in entry["files"]
                                    if item["path"].endswith("/summary.md")]}
@@ -200,13 +253,13 @@ def prepare(input_dir, run):
             "completionFile": str(run / "humanize/completion.json"),
             "checkCommand": [sys.executable, str(helper), "check", str(run), "--stage", "humanize"],
         }
-        humanize_prompt = regular(run / "protocol/references/humanize-worker.md")
+        humanize_prompt = notes.encode() + regular(run / "protocol/references/humanize-worker.md")
         humanize_prompt += b"\n\n## This run\n\n" + json_bytes(humanize_context)
         write(run / "protocol/humanize-worker-prompt.md", humanize_prompt)
-        humanize_call = dict(call, task_name=call["task_name"] + "_humanize",
-                            message="Read and follow the complete frozen worker instructions at "
-                            + str(run / "protocol/humanize-worker-prompt.md")
-                            + ". This file is your delegated task. Return its required final status.")
+        humanize_call = dispatch_args(worker, tag, "humanize",
+                                      "Read and follow the complete frozen worker instructions at "
+                                      + str(run / "protocol/humanize-worker-prompt.md")
+                                      + ". This file is your delegated task. Return its required final status.")
         write(run / "humanize-dispatch.json", humanize_call)
         write(run / "input_validation.json", {"status": "valid", "counts": corpus["counts"],
                                               "duplicates": corpus["duplicates"],
@@ -427,6 +480,12 @@ def main(argv=None):
     prep = commands.add_parser("prepare")
     prep.add_argument("input", type=Path)
     prep.add_argument("--run", type=Path, required=True)
+    prep.add_argument("--host", choices=HOSTS,
+                      help="Worker host; defaults to OXYGEN_WORKER_HOST or codex")
+    prep.add_argument("--model", help="Worker model; defaults to OXYGEN_WORKER_MODEL, "
+                                      "else gpt-6.1-sol for Codex or opus for Claude Code")
+    prep.add_argument("--effort", choices=EFFORTS,
+                      help="Reasoning effort; defaults to OXYGEN_WORKER_EFFORT, else high for Codex")
     for name in ("call", "record-worker", "read", "check", "accept", "verify"):
         cmd = commands.add_parser(name)
         cmd.add_argument("run", type=Path)
@@ -458,7 +517,7 @@ def main(argv=None):
                         raise ValueError(f"frozen_file_changed: {name}")
                 return subprocess.run([sys.executable, str(helper), *(argv or sys.argv[1:])]).returncode
         if args.command == "prepare":
-            result = prepare(args.input, run)
+            result = prepare(args.input, run, host=args.host, model=args.model, effort=args.effort)
         elif args.command == "call":
             result = issue_call(run, args.stage)
         elif args.command == "record-worker":

@@ -50,6 +50,32 @@ export function defaultReviewSelection(reviews: Review[], run: string) {
     .map((review) => review.id);
 }
 
+// Headings that name the section rather than the session.
+const GENERIC_HEADING =
+  /^(?:会话概览|会话概述|概览|概述|总览|摘要|overview|session overview|summary)$/i;
+
+function headings(review: Pick<Review, 'summaryLines'>) {
+  return review.summaryLines
+    .filter((line) => /^#{1,6}\s+/.test(line.text))
+    .map((line) => line.text.replace(/^#{1,6}\s+/, '').trim());
+}
+
+/** The Summary's first heading that names the session, or ''. */
+export function summaryHeading(review: Pick<Review, 'summaryLines'>) {
+  return (
+    headings(review).find(
+      (heading) => heading && !GENERIC_HEADING.test(heading),
+    ) ?? ''
+  );
+}
+
+/** The Summary's first specific heading, else the project name. */
+export function reviewTitle(
+  review: Pick<Review, 'summaryLines' | 'projectName'>,
+) {
+  return summaryHeading(review) || headings(review)[0] || review.projectName;
+}
+
 export type TrajectoryGroup = ReturnType<typeof trajectoryIdentity> & {
   title: string;
   reviews: Review[];
@@ -62,12 +88,9 @@ export function groupTrajectories(reviews: Review[]): TrajectoryGroup[] {
     const group = groups.get(identity.key);
     if (group) group.reviews.push(review);
     else {
-      const heading = review.summaryLines
-        .find((line) => /^#{1,6}\s+/.test(line.text))
-        ?.text.replace(/^#{1,6}\s+/, '');
       groups.set(identity.key, {
         ...identity,
-        title: heading || review.projectName,
+        title: reviewTitle(review),
         reviews: [review],
       });
     }

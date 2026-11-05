@@ -25,6 +25,7 @@ import {
   type Provider,
 } from '@/lib/agent-capabilities';
 import { Segmented } from '@/components/segmented';
+import { cn } from '@/lib/utils';
 
 type Preferences = {
   provider: Provider['id'];
@@ -73,6 +74,10 @@ export function AgentComposer({
   getContext,
   onEdit,
   onUndo,
+  onAnswer,
+  confirmEdit,
+  offsetLeft = false,
+  privacyOutcome = null,
 }: {
   protocolVersion: number;
   /** Shown as the target of "This card", e.g. "I003". */
@@ -83,8 +88,16 @@ export function AgentComposer({
   onEdit: (
     result: AgentResult,
     message: string,
-  ) => { changed: string[]; added: string[] };
+  ) => { changed: string[]; added: string[]; removed?: string[] };
   onUndo: () => void;
+  /** Record a question and the agent's answer (Ask mode) in the review history. */
+  onAnswer?: (message: string, answer: string) => void;
+  /** Asked before an Edit request is sent; false cancels it. */
+  confirmEdit?: () => Promise<boolean>;
+  /** Centre the bar beside the page's left sidebar on wide screens. */
+  offsetLeft?: boolean;
+  /** What became of the last privacy request (the page asks before saving it). */
+  privacyOutcome?: 'pending' | 'cancelled' | 'nothing' | null;
 }) {
   const [capabilities, setCapabilities] = useState<Capabilities>({
     state: 'loading',
@@ -94,9 +107,11 @@ export function AgentComposer({
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [answer, setAnswer] = useState('');
+  const [privacyAsked, setPrivacyAsked] = useState(false);
   const [applied, setApplied] = useState<{
     changed: string[];
     added: string[];
+    removed?: string[];
   } | null>(null);
   const [error, setError] = useState('');
   const abort = useRef<AbortController | null>(null);
@@ -190,6 +205,7 @@ export function AgentComposer({
   async function send() {
     const text = message.trim();
     if (!text || running || disabled || !usable || !model || !effort) return;
+    if (mode === 'edit' && confirmEdit && !(await confirmEdit())) return;
     const controller = new AbortController();
     abort.current = controller;
     setRunning(true);
@@ -197,6 +213,7 @@ export function AgentComposer({
     setError('');
     setAnswer('');
     setApplied(null);
+    setPrivacyAsked(false);
     try {
       const response = await fetch('/api/agent', {
         method: 'POST',
@@ -217,7 +234,10 @@ export function AgentComposer({
       };
       if (!response.ok) throw new Error(result.error || 'The request failed.');
       setAnswer(result.answer);
-      if (mode === 'edit') setApplied(onEdit(result, text));
+      if (mode === 'edit') {
+        setPrivacyAsked(Boolean(result.privacy));
+        setApplied(onEdit(result, text));
+      } else onAnswer?.(text, result.answer);
       setMessage('');
     } catch (failure) {
       if (!controller.signal.aborted) {
@@ -246,7 +266,12 @@ export function AgentComposer({
 
   if (preferences.collapsed) {
     return (
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center">
+      <div
+        className={cn(
+          'pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center',
+          offsetLeft && 'lg:left-[280px]',
+        )}
+      >
         <Button
           variant="outline"
           className="pointer-events-auto rounded-full bg-background/95 shadow-[var(--ui-shadow)] backdrop-blur"
@@ -275,7 +300,10 @@ export function AgentComposer({
   return (
     <section
       aria-label="Agent"
-      className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+      className={cn(
+        'pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4',
+        offsetLeft && 'lg:left-[280px]',
+      )}
     >
       <div className="pointer-events-auto w-full max-w-[760px] rounded-[16px] border bg-background/95 shadow-[0_8px_32px_rgba(15,15,15,0.12)] backdrop-blur">
         {(answer || error || running || status) && (
@@ -290,23 +318,51 @@ export function AgentComposer({
               </p>
             ) : answer ? (
               <>
-                <p className="whitespace-pre-wrap">{answer}</p>
+                {privacyAsked &&
+                (privacyOutcome === 'pending' ||
+                  privacyOutcome === 'cancelled') ? (
+                  <p
+                    className={cn(
+                      'whitespace-pre-wrap',
+                      privacyOutcome === 'cancelled' &&
+                        'text-muted-foreground line-through',
+                    )}
+                  >
+                    Proposed: {answer}
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap">{answer}</p>
+                )}
                 {applied && (
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>
-                      {applied.changed.length || applied.added.length
+                      {applied.changed.length ||
+                      applied.added.length ||
+                      applied.removed?.length
                         ? [
                             applied.changed.length &&
                               `Changed ${applied.changed.join(', ')}`,
                             applied.added.length &&
                               `Added ${applied.added.join(', ')}`,
+                            applied.removed?.length &&
+                              `Deleted ${applied.removed.join(', ')}`,
                           ]
                             .filter(Boolean)
-                            .join(' · ') + '. Pending your review.'
-                        : 'No cards were changed.'}
+                            .join(' · ') +
+                          (applied.changed.length || applied.added.length
+                            ? '. Pending your review.'
+                            : '.')
+                        : privacyAsked
+                          ? privacyOutcome === 'cancelled'
+                            ? 'Privacy request cancelled. Nothing was changed or saved.'
+                            : privacyOutcome === 'nothing'
+                              ? 'Nothing to remove was found. Nothing was saved.'
+                              : 'Privacy request: confirm in the dialog to save it.'
+                          : 'No cards were changed.'}
                     </span>
                     {(applied.changed.length > 0 ||
-                      applied.added.length > 0) && (
+                      applied.added.length > 0 ||
+                      (applied.removed?.length ?? 0) > 0) && (
                       <Button size="sm" variant="ghost" onClick={onUndo}>
                         <Undo2 data-icon="inline-start" />
                         Undo

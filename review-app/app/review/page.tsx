@@ -13,16 +13,15 @@ import {
   AlertTriangle,
   Check,
   Columns2,
-  Download,
   FilePlus2,
   FileText,
-  History,
   Lightbulb,
-  List,
   LogOut,
+  PanelLeft,
   PencilLine,
   Plus,
   Rows3,
+  Send,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -38,7 +37,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import type { Submission } from '@/lib/oxygen-api';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -56,18 +56,16 @@ import { ReviewInfo } from '@/components/review-info';
 import { ReviewTools } from '@/components/review-tools';
 import { ReviewChanges } from '@/components/review-changes';
 import { InsightTakeaway, InsightProse } from '@/components/insight-takeaway';
-import { ImportReview } from '@/components/import-review';
 import { InsightCard, insightStatusLabel } from '@/components/insight-card';
 import { AgentComposer } from '@/components/agent-composer';
 import { ReviewQueue } from '@/components/review-queue';
-import { TrajectoryPanel } from '@/components/trajectory-panel';
-import { ExportLabelingWarning } from '@/components/export-labeling-warning';
-import { exportLabelingSummary } from '@/lib/export-labeling';
+import { NextTrajectoryDialog } from '@/components/next-trajectory-dialog';
+import { Segmented } from '@/components/segmented';
+import { TrajectorySidebar } from '@/components/trajectory-sidebar';
+import { SubmitForm } from '@/components/submit-form';
 import {
-  defaultReviewSelection,
-  groupTrajectories,
   reviewContentLabel,
-  trajectoryIdentity,
+  reviewTitle,
   visibleReviews,
 } from '@/lib/trajectory-list';
 import {
@@ -76,8 +74,24 @@ import {
   parseReviewerInsight,
   reviewerInsightDraft,
 } from '@/lib/reviewer-insight';
-import { applyCards, type AgentResult } from '@/lib/agent-prompt';
-import { reviewLabels } from '@/lib/review-label';
+import {
+  agentEditNote,
+  agentQuestionNote,
+  applyPrivacy,
+  applyCards,
+  removeInsights,
+  type AgentResult,
+} from '@/lib/agent-prompt';
+import {
+  buildTrajectoryIndex,
+  defaultReview,
+  generationLabel,
+  locate,
+  sessionReview,
+  unfinishedAfter,
+  type IndexRun,
+  type Version,
+} from '@/lib/trajectory-index';
 import {
   readView,
   serverView,
@@ -129,12 +143,54 @@ function nextItemId(ids: string[], prefix: 'L' | 'I') {
   return `${prefix}${String(highest + 1).padStart(3, '0')}`;
 }
 
+const SIDEBAR_KEY = 'oxygen-review-sidebar';
+const UNREDACTED_ACK_KEY = 'oxygen-unredacted-ack';
+
+function readSidebarOpen() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_KEY) !== 'closed';
+  } catch {
+    return true;
+  }
+}
+
+function writeSidebarOpen(open: boolean) {
+  try {
+    window.localStorage.setItem(SIDEBAR_KEY, open ? 'open' : 'closed');
+  } catch {
+    // Not remembering the choice is harmless.
+  }
+}
+
+/** Unredacted reviews whose warning the contributor has accepted. */
+function readUnredactedAck(): string[] {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(UNREDACTED_ACK_KEY) ?? '[]',
+    ) as unknown;
+    return Array.isArray(saved)
+      ? saved.filter((item) => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUnredactedAck(reviewId: string) {
+  try {
+    const next = [...new Set([...readUnredactedAck(), reviewId])].slice(-500);
+    window.localStorage.setItem(UNREDACTED_ACK_KEY, JSON.stringify(next));
+  } catch {
+    // The warning will show again; harmless.
+  }
+}
+
 function reviewIsCompletable(review: Review) {
   if (review.format !== 'v5') return true;
   return (
     (review.reviewLevel === 'global' ||
-      (review.privacyStatus === 'redacted' &&
-        review.provenance.hashVerified)) &&
+      review.provenance.hashVerified ||
+      (review.privacyEpoch ?? 0) > 0) &&
     review.insights.every(
       (insight) =>
         insight.status === 'accepted' || insight.status === 'rejected',
@@ -179,10 +235,28 @@ export default function Home() {
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [promptFeedback, setPromptFeedback] = useState('');
-  const [batchExportOpen, setBatchExportOpen] = useState(false);
-  const [exportIds, setExportIds] = useState<string[]>([]);
-  const [exportWarningOpen, setExportWarningOpen] = useState(false);
-  const [exportWithHistory, setExportWithHistory] = useState(false);
+  // The Submit panel, and the earlier submissions it compares against.
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [runs, setRuns] = useState<IndexRun[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen);
+  const [sidebarSheet, setSidebarSheet] = useState(false);
+  // Session key of the trajectory just completed; opens the next-trajectory dialog.
+  const [completedSession, setCompletedSession] = useState<string | null>(null);
+  const [completedCount, setCompletedCount] = useState(0);
+  // A privacy request from the agent, waiting for the contributor to confirm the history reset.
+  const [pendingPrivacy, setPendingPrivacy] = useState<AgentResult | null>(
+    null,
+  );
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const [privacyOutcome, setPrivacyOutcome] = useState<
+    'pending' | 'cancelled' | 'nothing' | null
+  >(null);
+  const [privacyError, setPrivacyError] = useState('');
+  // Resolves the pending edit once the unredacted warning is answered.
+  const [unredactedPrompt, setUnredactedPrompt] = useState<
+    ((edit: boolean) => void) | null
+  >(null);
 
   const navigationReviews = visibleReviews(reviews, activeId);
   const active =
@@ -256,7 +330,11 @@ export default function Home() {
   );
   const workflowField = hasWorkflowField(active?.protocolVersion ?? 7);
   const insightTypes = insightTypesForProtocol(active?.protocolVersion ?? 7);
-  const labels = useMemo(() => reviewLabels(reviews), [reviews]);
+  const index = useMemo(
+    () => buildTrajectoryIndex(reviews, runs),
+    [reviews, runs],
+  );
+  const located = active ? locate(index, active.id) : null;
   const markdownEditor =
     editorTarget?.kind === 'insight' &&
     (editorTarget.mode === 'add' ||
@@ -314,6 +392,14 @@ export default function Home() {
   useEffect(() => {
     if (authState !== 'signed_in') return;
     let cancelled = false;
+    // Run information names trajectories by session; reviews still load without it.
+    const loadRuns = fetch('/api/oxygen/runs', { cache: 'no-store' })
+      .then(async (response) =>
+        response.ok
+          ? (((await response.json()) as { runs?: IndexRun[] }).runs ?? [])
+          : [],
+      )
+      .catch(() => [] as IndexRun[]);
     fetch('/api/reviews', { cache: 'no-store' })
       .then(async (response) => {
         if (response.status === 401) {
@@ -323,8 +409,20 @@ export default function Home() {
         if (!response.ok) throw new Error('Unable to load reviews.');
         return response.json() as Promise<{ reviews: Review[] }>;
       })
-      .then(({ reviews: loaded }) => {
+      .then(async ({ reviews: loaded }) => {
+        // Wait briefly for the runs so the first trajectory opened is the right
+        // one; if they come later, they only rename and regroup the sidebar.
+        const early = await Promise.race([
+          loadRuns,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ]);
         if (cancelled) return;
+        const loadedRuns = early ?? [];
+        if (early) setRuns(early);
+        else
+          void loadRuns.then((late) => {
+            if (!cancelled) setRuns(late);
+          });
         const requestedId = new URLSearchParams(window.location.search).get(
           'review',
         );
@@ -346,7 +444,10 @@ export default function Home() {
             'review',
           );
           const requested = loaded.find((review) => review.id === requestedId);
-          const fallback = requested ?? visibleReviews(loaded)[0];
+          const fallback =
+            requested ??
+            defaultReview(buildTrajectoryIndex(loaded, loadedRuns)) ??
+            visibleReviews(loaded)[0];
           if (!fallback) return;
           setActiveId((current) =>
             loaded.some((review) => review.id === current)
@@ -354,16 +455,6 @@ export default function Home() {
               : fallback.id,
           );
           const parameters = new URLSearchParams(window.location.search);
-          const run =
-            parameters.get('run') ??
-            trajectoryIdentity(fallback.sourcePath, fallback.id).run;
-          setExportIds(defaultReviewSelection(loaded, run));
-          if (
-            parameters.get('trajectories') === '1' &&
-            !parameters.has('changes')
-          ) {
-            setBatchExportOpen(true);
-          }
           const requestedInsight = parameters.get('insight');
           setSelectedInsight(
             fallback.insights.find((insight) => insight.id === requestedInsight)
@@ -400,32 +491,141 @@ export default function Home() {
   const chooseViewMode = setView;
   const [cardsTab, setCardsTab] = useState<'insights' | 'summary'>('insights');
 
-  async function goToInsight(target: QueuePosition) {
-    setCardsTab('insights');
-    if (target.reviewId === activeRef.current?.id) {
-      setSelectedInsight(target.insightId);
-      return;
-    }
-    if (editorTarget || !(await autosave.flush())) return;
-    const review = reviews.find((item) => item.id === target.reviewId);
-    if (!review) return;
-    activateReview(review);
-    setSelectedInsight(target.insightId);
+  function needsUnredactedWarning() {
+    const current = activeRef.current;
+    return Boolean(
+      current &&
+      current.format === 'v5' &&
+      current.reviewLevel !== 'global' &&
+      current.privacyStatus !== 'redacted' &&
+      !readUnredactedAck().includes(current.id),
+    );
   }
 
-  /** Record a decision, then move to the next card that still needs one. */
-  function decide(status: InsightStatus) {
-    if (!selected) return;
-    setInsightStatus(selected.id, status);
-    const updated = activeRef.current;
-    if (!updated) return;
-    const next = nextUndecided(
-      navigationReviews.map((item) =>
-        item.id === updated.id ? updated : item,
-      ),
-      { reviewId: updated.id, insightId: selected.id },
-    );
-    if (next) void goToInsight(next);
+  /** Before the first edit of an unredacted review, warn and ask. */
+  function confirmUnredacted(): Promise<boolean> {
+    if (!needsUnredactedWarning()) return Promise.resolve(true);
+    return new Promise((resolve) => setUnredactedPrompt(() => resolve));
+  }
+
+  function guard(action: () => void) {
+    void confirmUnredacted().then((edit) => {
+      if (edit) action();
+    });
+  }
+
+  function answerUnredacted(edit: boolean) {
+    const resolve = unredactedPrompt;
+    setUnredactedPrompt(null);
+    const current = activeRef.current;
+    if (edit && current) writeUnredactedAck(current.id);
+    resolve?.(edit);
+    if (!edit) switchVersion('redacted');
+  }
+
+  function switchVersion(version: Version) {
+    if (located?.kind !== 'session') return;
+    const target = located.generation[version];
+    if (target && target.id !== active?.id) void chooseReview(target.id);
+  }
+
+  async function completeReview() {
+    if (!(await confirmUnredacted())) return;
+    const current = activeRef.current;
+    const saved = await persist('completed');
+    if (!saved || !current) return;
+    const place = locate(index, current.id);
+    if (
+      place?.kind === 'session' &&
+      unfinishedAfter(index, place.session.key).length
+    ) {
+      setCompletedCount((count) => count + 1);
+      setCompletedSession(place.session.key);
+    } else {
+      // Every trajectory is labeled, or global insights were completed.
+      void openSubmit();
+    }
+  }
+
+  /**
+   * Save a privacy request: the cleaned review replaces the current one and
+   * every earlier saved version is deleted. The cleaned version becomes the
+   * new starting version (0) under a new review address.
+   */
+  async function confirmPrivacy() {
+    const result = pendingPrivacy;
+    const current = activeRef.current;
+    if (!result?.privacy || !current) return;
+    setPrivacySaving(true);
+    setPrivacyError('');
+    try {
+      if (!(await autosave.flush()))
+        throw new Error('Save or resolve your pending changes first.');
+      const latest = activeRef.current ?? current;
+      const cleaned = applyPrivacy(
+        latest,
+        result.privacy,
+        result.cards,
+        result.removeCards,
+      );
+      const strip = <T extends { originalText?: string }>({
+        originalText: _originalText,
+        ...rest
+      }: T) => rest;
+      const response = await fetch(`/api/reviews/${latest.id}/privacy`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedVersion: revisionClient.versionFor(latest),
+          requestId: crypto.randomUUID(),
+          projectName: result.privacy.projectName ?? latest.projectName,
+          state: {
+            trajectorySummary: { text: latest.trajectorySummary.text },
+            summaryGroups: latest.summaryGroups.map(strip),
+            summaryLines: cleaned.summaryLines.map(strip),
+            insights: cleaned.insights.map(strip),
+            status: latest.status,
+          },
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        review?: Review;
+        error?: string;
+      } | null;
+      if (!response.ok || !body?.review)
+        throw new Error(body?.error || 'Unable to save the privacy cleanup.');
+      const replacement = body.review;
+      revisionClient.loaded(replacement);
+      agentUndo.current = null;
+      activeRef.current = replacement;
+      setReviews((items) => [
+        replacement,
+        ...items.filter((item) => item.id !== latest.id),
+      ]);
+      activateReview(replacement);
+      setPendingPrivacy(null);
+      setPrivacyOutcome(null);
+    } catch (error) {
+      setPrivacyError(
+        error instanceof Error ? error.message : 'Unable to save the cleanup.',
+      );
+    } finally {
+      setPrivacySaving(false);
+    }
+  }
+
+  async function openFromSidebar(reviewId: string) {
+    setSidebarSheet(false);
+    await chooseReview(reviewId);
+  }
+
+  function toggleSidebar() {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      setSidebarOpen((open) => {
+        writeSidebarOpen(!open);
+        return !open;
+      });
+    } else setSidebarSheet(true);
   }
 
   const agentUndo = useRef<{
@@ -433,14 +633,41 @@ export default function Home() {
     previous: Insight[];
     changed: string[];
     added: string[];
+    removed: string[];
   } | null>(null);
 
   /** Apply the agent's proposed cards; everything it touches is pending again. */
   function applyAgentEdit(result: AgentResult, message: string) {
     const current = activeRef.current;
     if (!current) return { changed: [], added: [] };
+    if (result.privacy) {
+      // Never saved as an ordinary edit: the request may itself name what to remove.
+      const cleaned = applyPrivacy(
+        current,
+        result.privacy,
+        result.cards,
+        result.removeCards,
+      );
+      const renamed =
+        result.privacy.projectName !== null &&
+        result.privacy.projectName !== current.projectName;
+      if (
+        cleaned.changedLines.length ||
+        cleaned.changedCards.length ||
+        cleaned.removedCards.length ||
+        renamed
+      ) {
+        setPrivacyError('');
+        setPendingPrivacy(result);
+        setPrivacyOutcome('pending');
+      } else setPrivacyOutcome('nothing');
+      return { changed: [], added: [] };
+    }
     const merged = applyCards(current.insights, result.cards);
-    if (!merged.changed.length && !merged.added.length) {
+    const removed = result.removeCards ?? [];
+    if (!merged.changed.length && !merged.added.length && !removed.length) {
+      // Keep the request in the history even when the agent changed nothing.
+      recordAgentNote(agentQuestionNote(message, result.answer, true));
       return { changed: [], added: [] };
     }
     agentUndo.current = {
@@ -448,13 +675,34 @@ export default function Home() {
       previous: current.insights,
       changed: merged.changed,
       added: merged.added,
+      removed,
     };
-    updateActive(
-      (review) => ({ ...review, insights: merged.insights }),
-      `Agent edit: ${message.slice(0, 200)}`,
+    // Deleting renumbers the remaining cards; report them by their new IDs.
+    const remaining = removeInsights(merged.insights, removed);
+    const survivors = merged.insights.filter(
+      (card) => !removed.includes(card.id),
     );
-    setSelectedInsight(merged.changed[0] ?? merged.added[0]);
-    return { changed: merged.changed, added: merged.added };
+    const renumbered = new Map(
+      survivors.map((card, position) => [card.id, remaining[position].id]),
+    );
+    const changed = merged.changed.map((id) => renumbered.get(id) ?? id);
+    const added = merged.added.map((id) => renumbered.get(id) ?? id);
+    updateActive(
+      (review) => ({ ...review, insights: remaining }),
+      agentEditNote(message, result.answer),
+      { separate: true },
+    );
+    const firstRemoved = current.insights.findIndex((card) =>
+      removed.includes(card.id),
+    );
+    setSelectedInsight(
+      changed[0] ??
+        added[0] ??
+        remaining[Math.min(Math.max(firstRemoved, 0), remaining.length - 1)]
+          ?.id ??
+        '',
+    );
+    return { changed, added, removed };
   }
 
   function undoAgentEdit() {
@@ -462,6 +710,15 @@ export default function Home() {
     const current = activeRef.current;
     if (!undo || !current || current.id !== undo.reviewId) return;
     agentUndo.current = null;
+    if (undo.removed.length) {
+      // Deleting renumbered the cards; restore the list as it was.
+      updateActive(
+        (review) => ({ ...review, insights: undo.previous }),
+        'Undid agent edit',
+        { separate: true },
+      );
+      return;
+    }
     const trailing =
       undo.added.length > 0 &&
       current.insights
@@ -481,17 +738,8 @@ export default function Home() {
         ),
       }),
       'Undid agent edit',
+      { separate: true },
     );
-  }
-
-  function step(direction: 1 | -1) {
-    if (!active || !selected) return;
-    const target = neighbour(
-      navigationReviews,
-      { reviewId: active.id, insightId: selected.id },
-      direction,
-    );
-    if (target) void goToInsight(target);
   }
 
   function openEvidence(lineId: string) {
@@ -499,51 +747,6 @@ export default function Home() {
     setCardsTab('summary');
     window.setTimeout(() => jumpToEvidence(selected.id, lineId), 120);
   }
-
-  const keyHandler = useRef<(event: KeyboardEvent) => void>(() => undefined);
-  useEffect(() => {
-    keyHandler.current = (event) => {
-      if (
-        viewMode !== 'cards' ||
-        cardsTab !== 'insights' ||
-        authState !== 'signed_in' ||
-        !selected
-      )
-        return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (
-        editorTarget ||
-        deleteTarget ||
-        batchExportOpen ||
-        exportWarningOpen ||
-        reconcileOpen
-      ) {
-        return;
-      }
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        target.closest(
-          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"]',
-        )
-      ) {
-        return;
-      }
-      const key = event.key.toLowerCase();
-      if (key === 'a') decide('accepted');
-      else if (key === 'd') decide('rejected');
-      else if (key === 'e') openEditor('insight', selected.id);
-      else if (key === 'j' || key === 'arrowright') step(1);
-      else if (key === 'k' || key === 'arrowleft') step(-1);
-      else return;
-      event.preventDefault();
-    };
-  });
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => keyHandler.current(event);
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   async function handleLogin(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -576,7 +779,6 @@ export default function Home() {
     if (!(await autosave.flush())) return;
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
     setReviews([]);
-    setExportIds([]);
     setReviewsLoaded(false);
     setActiveId('');
     setSelectedInsight('');
@@ -588,12 +790,6 @@ export default function Home() {
     if (editorTarget || !(await autosave.flush())) return;
     const review = reviews.find((item) => item.id === id);
     if (!review) return;
-    activateReview(review);
-  }
-
-  function openImportedReview(review: Review) {
-    revisionClient.loaded(review);
-    setReviews((current) => [review, ...current]);
     activateReview(review);
   }
 
@@ -610,7 +806,15 @@ export default function Home() {
     setSaveError('');
   }
 
-  function updateActive(transform: (review: Review) => Review, note: string) {
+  /**
+   * Change the active review and save it. `separate` saves this change as its own
+   * revision, so a quick follow-up edit cannot replace its note (agent requests).
+   */
+  function updateActive(
+    transform: (review: Review) => Review,
+    note: string,
+    { separate = false }: { separate?: boolean } = {},
+  ) {
     const current = activeRef.current;
     if (!current) return;
     const next = transform(current);
@@ -618,10 +822,24 @@ export default function Home() {
     setReviews((items) =>
       items.map((item) => (item.id === next.id ? next : item)),
     );
-    autosave.enqueue({
+    const save = {
       review: next,
       note,
-      status: 'in_review',
+      status: 'in_review' as const,
+      requestId: crypto.randomUUID(),
+    };
+    if (separate) void autosave.commit(save);
+    else autosave.enqueue(save);
+  }
+
+  /** Save a request that changed no content (a question, or a declined edit) as its own revision. */
+  function recordAgentNote(note: string) {
+    const current = activeRef.current;
+    if (!current) return;
+    void autosave.commit({
+      review: current,
+      note,
+      status: current.status,
       requestId: crypto.randomUUID(),
     });
   }
@@ -699,6 +917,14 @@ export default function Home() {
   }
 
   function openEditor(kind: ItemKind, id: string) {
+    guard(() => openEditorNow(kind, id));
+  }
+
+  function requestDelete(target: NonNullable<DeleteTarget>) {
+    guard(() => setDeleteTarget(target));
+  }
+
+  function openEditorNow(kind: ItemKind, id: string) {
     if (!active) return;
     resetDraft();
     if (kind === 'trajectory') {
@@ -735,6 +961,10 @@ export default function Home() {
   }
 
   function openCreate(kind: 'summary' | 'insight') {
+    guard(() => openCreateNow(kind));
+  }
+
+  function openCreateNow(kind: 'summary' | 'insight') {
     if (!active) return;
     resetDraft();
     const id =
@@ -1098,31 +1328,23 @@ export default function Home() {
     }, 0);
   }
 
-  async function openBatchExport() {
+  /** Open the Submit panel: choose labeled trajectories and hand them in. */
+  async function openSubmit() {
     if (editorTarget || !(await autosave.flush())) return;
-    setBatchExportOpen(true);
-  }
-
-  async function exportActiveReview(includeHistory: boolean) {
-    if (!active || !(await autosave.flush())) return;
-    setExportWithHistory(includeHistory);
-    if (exportLabelingSummary([active]).incompleteReviews > 0)
-      setExportWarningOpen(true);
-    else await downloadActiveReview(includeHistory);
-  }
-
-  async function downloadActiveReview(includeHistory = exportWithHistory) {
-    if (!active || editorTarget !== null || !(await autosave.flush())) return;
-    const link = document.createElement('a');
-    link.href = `/api/reviews/${active.id}/export${includeHistory ? '?history=1' : ''}`;
-    link.download = '';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    setSubmitOpen(true);
+    fetch('/api/oxygen/submissions', { cache: 'no-store' })
+      .then(async (response) =>
+        response.ok
+          ? (((await response.json()) as { submissions?: Submission[] })
+              .submissions ?? [])
+          : [],
+      )
+      .then(setSubmissions)
+      .catch(() => setSubmissions([]));
   }
 
   async function persist(status: Review['status']) {
-    if (!activeRef.current) return;
+    if (!activeRef.current) return false;
     autosave.enqueue({
       review: activeRef.current,
       note:
@@ -1132,8 +1354,95 @@ export default function Home() {
       status,
       requestId: crypto.randomUUID(),
     });
-    await autosave.flush();
+    return autosave.flush();
   }
+
+  // Declared after the functions they call.
+  async function goToInsight(target: QueuePosition) {
+    setCardsTab('insights');
+    if (target.reviewId === activeRef.current?.id) {
+      setSelectedInsight(target.insightId);
+      return;
+    }
+    if (editorTarget || !(await autosave.flush())) return;
+    const review = reviews.find((item) => item.id === target.reviewId);
+    if (!review) return;
+    activateReview(review);
+    setSelectedInsight(target.insightId);
+  }
+
+  /**
+   * Record a decision, then move to the next card of this review that still
+   * needs one. Moving to another trajectory is the contributor's choice.
+   */
+  async function decide(status: InsightStatus) {
+    if (!selected || !(await confirmUnredacted())) return;
+    setInsightStatus(selected.id, status);
+    const updated = activeRef.current;
+    if (!updated) return;
+    const next = nextUndecided([updated], {
+      reviewId: updated.id,
+      insightId: selected.id,
+    });
+    if (next) void goToInsight(next);
+  }
+
+  function step(direction: 1 | -1) {
+    if (!active || !selected) return;
+    const target = neighbour(
+      [active],
+      { reviewId: active.id, insightId: selected.id },
+      direction,
+    );
+    if (target) void goToInsight(target);
+  }
+
+  const keyHandler = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    keyHandler.current = (event) => {
+      if (
+        viewMode !== 'cards' ||
+        cardsTab !== 'insights' ||
+        authState !== 'signed_in' ||
+        !selected
+      )
+        return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        editorTarget ||
+        deleteTarget ||
+        submitOpen ||
+        reconcileOpen ||
+        unredactedPrompt ||
+        completedSession ||
+        pendingPrivacy
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"]',
+        )
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === 'a') void decide('accepted');
+      else if (key === 'd') void decide('rejected');
+      else if (key === 'e') openEditor('insight', selected.id);
+      else if (key === 'j' || key === 'arrowright') step(1);
+      else if (key === 'k' || key === 'arrowleft') step(-1);
+      else return;
+      event.preventDefault();
+    };
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   if (authState === 'checking') {
     return <CenteredMessage label="Checking access…" />;
@@ -1205,15 +1514,16 @@ export default function Home() {
           <FilePlus2 className="mx-auto size-8 text-muted-foreground" />
           <h1 className="mt-4 text-lg font-semibold">No reviews waiting</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Humanized or redacted insights and summaries will appear here after
-            import. Older extraction drafts remain available through their
-            review links.
+            Trajectories appear here once a run has processed them. Start a run
+            from the Projects page.
           </p>
           {saveError && (
             <p className="mt-3 text-sm text-destructive">{saveError}</p>
           )}
           <div className="mt-5 flex justify-center gap-2">
-            <ImportReview onImported={openImportedReview} />
+            <Link href="/" className={buttonVariants()}>
+              Projects
+            </Link>
             <Button variant="outline" onClick={handleLogout}>
               <LogOut data-icon="inline-start" />
               Sign out
@@ -1225,10 +1535,16 @@ export default function Home() {
   }
 
   const completable = reviewIsCompletable(active);
+  const reviewName =
+    located?.kind === 'session'
+      ? located.session.label
+      : active.reviewLevel === 'global'
+        ? active.projectName
+        : reviewTitle(active);
   const unresolved = active.insights.filter(
     (insight) => insight.status !== 'accepted' && insight.status !== 'rejected',
   ).length;
-  const queue = queueSummary(navigationReviews);
+  const queue = queueSummary([active]);
   const queuePosition: QueuePosition | null = selected
     ? { reviewId: active.id, insightId: selected.id }
     : null;
@@ -1253,7 +1569,7 @@ export default function Home() {
               evidence={evidence}
               onEdit={(lineId) => openEditor('summary', lineId)}
               onDelete={(lineId) =>
-                setDeleteTarget({ kind: 'summary', id: lineId })
+                requestDelete({ kind: 'summary', id: lineId })
               }
             />
           ) : (
@@ -1268,7 +1584,7 @@ export default function Home() {
           review={active}
           evidence={evidence}
           onEdit={openEditor}
-          onDelete={(id) => setDeleteTarget({ kind: 'summary', id })}
+          onDelete={(id) => requestDelete({ kind: 'summary', id })}
         />
       )}
     </>
@@ -1276,16 +1592,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-background text-foreground lg:flex lg:h-dvh lg:min-h-0 lg:flex-col lg:overflow-hidden">
-      <TrajectoryPanel
-        reviews={reviews}
-        active={active}
-        open={batchExportOpen}
-        onOpenChange={setBatchExportOpen}
-        selectedIds={exportIds}
-        setSelectedIds={setExportIds}
-        onOpenReview={chooseReview}
-        unsaved={dirty || saveState === 'saving' || editorTarget !== null}
-      />
       <AgentComposer
         key={active.id}
         protocolVersion={active.protocolVersion}
@@ -1295,6 +1601,7 @@ export default function Home() {
           const current = activeRef.current ?? active;
           return {
             protocolVersion: current.protocolVersion,
+            projectName: current.projectName,
             summaryLines: current.summaryLines.map(({ id, text, kind }) => ({
               id,
               text,
@@ -1305,13 +1612,13 @@ export default function Home() {
           };
         }}
         onEdit={applyAgentEdit}
+        confirmEdit={confirmUnredacted}
+        privacyOutcome={privacyOutcome}
+        offsetLeft={sidebarOpen}
         onUndo={undoAgentEdit}
-      />
-      <ExportLabelingWarning
-        reviews={[active]}
-        open={exportWarningOpen}
-        onOpenChange={setExportWarningOpen}
-        onConfirm={downloadActiveReview}
+        onAnswer={(message, answer) =>
+          recordAgentNote(agentQuestionNote(message, answer))
+        }
       />
       <header className="shrink-0 border-b bg-background px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
@@ -1324,22 +1631,56 @@ export default function Home() {
             >
               <Sparkles className="size-3.5" />
             </Link>
-            <select
-              aria-label="Choose review"
-              disabled={editorTarget !== null}
-              value={active.id}
-              onChange={(event) => chooseReview(event.target.value)}
-              title={labels.get(active.id)}
-              className="h-8 w-full min-w-0 max-w-lg flex-1 cursor-pointer truncate rounded-[4px] border-0 bg-transparent px-1.5 text-sm outline-none hover:bg-[color:var(--ui-hover)] focus-visible:ring-2 focus-visible:ring-ring"
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Trajectories"
+              aria-controls="trajectory-sidebar"
+              title="Show or hide trajectories"
+              onClick={toggleSidebar}
             >
-              {navigationReviews.map((review) => (
-                <option key={review.id} value={review.id}>
-                  {review.id === active.id && review.reviewLevel === 'global'
-                    ? review.projectName
-                    : labels.get(review.id)}
-                </option>
-              ))}
-            </select>
+              <PanelLeft />
+            </Button>
+            <h1
+              className="min-w-0 truncate text-sm font-medium"
+              title={reviewName}
+            >
+              {reviewName}
+            </h1>
+            {located?.kind === 'session' && (
+              <Segmented
+                label="Version"
+                size="md"
+                value={located.version}
+                onChange={switchVersion}
+                options={[
+                  {
+                    id: 'redacted',
+                    text:
+                      located.generation.redacted?.status === 'completed'
+                        ? 'Redacted ✓'
+                        : 'Redacted',
+                    disabled:
+                      !located.generation.redacted || editorTarget !== null,
+                    title: located.generation.redacted
+                      ? 'Privacy-redacted summary and insights (label this one)'
+                      : 'This run produced no redacted version',
+                  },
+                  {
+                    id: 'unredacted',
+                    text:
+                      located.generation.unredacted?.status === 'completed'
+                        ? 'Unredacted ✓'
+                        : 'Unredacted',
+                    disabled:
+                      !located.generation.unredacted || editorTarget !== null,
+                    title: located.generation.unredacted
+                      ? 'The original wording, before privacy redaction'
+                      : 'This run produced no unredacted version',
+                  },
+                ]}
+              />
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             <ReviewChanges
@@ -1393,50 +1734,33 @@ export default function Home() {
                       ? 'Complete review'
                       : active.reviewLevel === 'global'
                         ? 'Resolve every global insight before completing'
-                        : 'Complete a redacted review after resolving every Insight'
+                        : 'Complete after resolving every Insight'
                 }
-                onClick={() => persist('completed')}
+                onClick={() => void completeReview()}
               >
                 <Check data-icon="inline-start" />
                 Complete
               </Button>
+              <Button
+                variant="outline"
+                disabled={
+                  active.status !== 'completed' ||
+                  dirty ||
+                  saveState === 'saving' ||
+                  editorTarget !== null
+                }
+                title={
+                  active.status === 'completed'
+                    ? 'Choose labeled trajectories to submit'
+                    : 'Complete this review first'
+                }
+                onClick={() => void openSubmit()}
+              >
+                <Send data-icon="inline-start" />
+                Submit…
+              </Button>
             </div>
             <ReviewTools>
-              <ImportReview
-                disabled={
-                  dirty || saveState === 'saving' || editorTarget !== null
-                }
-                onImported={openImportedReview}
-              />
-              <Button
-                variant="ghost"
-                disabled={editorTarget !== null}
-                title={
-                  editorTarget
-                    ? 'Apply or cancel your edit before exporting'
-                    : 'Save pending changes automatically and export'
-                }
-                aria-label="Export reviewed artifacts"
-                onClick={() => exportActiveReview(false)}
-              >
-                <Download data-icon="inline-start" />
-                Export
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={editorTarget !== null}
-                title="Private download: reviewed artifacts plus every saved version, request text, and diffs"
-                aria-label="Export reviewed artifacts with edit history"
-                onClick={() => exportActiveReview(true)}
-              >
-                <History data-icon="inline-start" />
-                Export with history
-              </Button>
-              <Button variant="ghost" onClick={openBatchExport}>
-                <List data-icon="inline-start" />
-                Trajectories ({groupTrajectories(reviews).length})
-              </Button>
-              <div className="my-1 border-t" />
               <ReviewGuide review={active} showLabel />
               <ReviewInfo review={active} showLabel />
               <Button
@@ -1456,7 +1780,14 @@ export default function Home() {
               Based on {active.globalSources?.length ?? 0} reviewed trajectories
             </span>
           )}
-          {active.format === 'v5' && (
+          {located?.kind === 'session' && (
+            <span>
+              Generated in {generationLabel(located.generation)}
+              {located.session.generations.length > 1 &&
+                ` · ${located.session.generations.length} generations`}
+            </span>
+          )}
+          {active.format === 'v5' && located?.kind !== 'session' && (
             <span
               className="inline-flex items-center gap-1"
               title={
@@ -1475,7 +1806,12 @@ export default function Home() {
                 : reviewContentLabel(active)}
             </span>
           )}
-          {active.status === 'completed' && <span>Completed</span>}
+          {active.status === 'completed' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-px font-medium text-emerald-800">
+              <Check className="size-3" strokeWidth={3} />
+              Completed
+            </span>
+          )}
           <output
             aria-label="Save status"
             className={saveState === 'error' ? 'text-destructive' : ''}
@@ -1541,153 +1877,376 @@ export default function Home() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {viewMode === 'cards' ? (
-        <div className="flex min-h-0 flex-col bg-[color:var(--sidebar)] lg:flex-1">
-          <ReviewQueue
-            review={active}
-            insight={selected}
-            index={Math.max(
-              0,
-              active.insights.findIndex((item) => item.id === selected?.id),
-            )}
-            remaining={queue.undecided}
-            structured={
-              active.format === 'v5' || selected?.authorship === 'reviewer'
-            }
-            skillCandidate={skillCandidates}
-            evidenceLabels={globalEvidenceLabels}
-            hasPrevious={
-              !!queuePosition &&
-              neighbour(navigationReviews, queuePosition, -1) !== null
-            }
-            hasNext={
-              !!queuePosition &&
-              neighbour(navigationReviews, queuePosition, 1) !== null
-            }
-            completable={completable && saveState !== 'saving'}
-            disabled={editorTarget !== null}
-            onStatus={decide}
-            onEdit={() => selected && openEditor('insight', selected.id)}
-            onDelete={() =>
-              selected && setDeleteTarget({ kind: 'insight', id: selected.id })
-            }
-            onPrevious={() => step(-1)}
-            onNext={() => step(1)}
-            onOpenEvidence={openEvidence}
-            onComplete={() => persist('completed')}
-            tab={cardsTab}
-            onTabChange={setCardsTab}
-            summary={summaryBody}
-            summaryCount={active.summaryLines.length}
-          />
-        </div>
-      ) : (
-        <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
-          <section
-            className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
-            aria-labelledby="summary-heading"
-          >
-            <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
-              <div className="flex items-center gap-2">
-                <FileText className="size-4 text-muted-foreground" />
-                <h1 id="summary-heading" className="text-sm font-medium">
-                  {active.reviewLevel === 'global'
-                    ? 'Source summaries'
-                    : 'Summary'}
-                </h1>
-                <span className="text-sm text-muted-foreground">
-                  {active.summaryLines.length}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => openCreate('summary')}
-              >
-                <Plus data-icon="inline-start" />
-                Add line
-              </Button>
-            </div>
-            <ScrollArea className="h-[min(560px,60dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
-              {summaryBody}
-            </ScrollArea>
-          </section>
-
-          <section
-            className="flex min-h-0 min-w-0 flex-col bg-[color:var(--sidebar)]"
-            aria-labelledby="insights-heading"
-          >
-            <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
-              <div className="flex items-center gap-2">
-                <Lightbulb className="size-4 text-muted-foreground" />
-                <h2 id="insights-heading" className="text-sm font-medium">
-                  {active.reviewLevel === 'global'
-                    ? 'Global insight cards'
-                    : 'Insight cards'}
-                </h2>
-                <span className="text-sm text-muted-foreground">
-                  {active.insights.length}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => openCreate('insight')}
-              >
-                <Plus data-icon="inline-start" />
-                Add insight
-              </Button>
-            </div>
-            <ScrollArea className="h-[min(620px,65dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
-              {active.insights.length ? (
-                <div className="space-y-3 p-4 pb-44 sm:p-5 sm:pb-44">
-                  {active.insights.map((insight) => (
-                    <InsightCard
-                      key={insight.id}
-                      insight={insight}
-                      evidenceLabels={
-                        active.reviewLevel === 'global'
-                          ? Object.fromEntries(
-                              active.summaryLines.map((line) => [
-                                line.id,
-                                line.sourceId ?? line.id,
-                              ]),
-                            )
-                          : undefined
-                      }
-                      skillCandidate={skillCandidates}
-                      structured={
-                        active.format === 'v5' ||
-                        insight.authorship === 'reviewer'
-                      }
-                      selected={insight.id === selected?.id}
-                      onSelect={() => setSelectedInsight(insight.id)}
-                      onEvidence={(lineId) =>
-                        jumpToEvidence(insight.id, lineId)
-                      }
-                      onEdit={() => openEditor('insight', insight.id)}
-                      onDelete={() => {
-                        setSelectedInsight(insight.id);
-                        setDeleteTarget({ kind: 'insight', id: insight.id });
-                      }}
-                      onStatus={(status) =>
-                        setInsightStatus(insight.id, status)
-                      }
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  label="No supported Insights retained"
-                  onAdd={() => openCreate('insight')}
-                />
-              )}
-            </ScrollArea>
-          </section>
+      {located?.kind === 'session' && located.version === 'unredacted' && (
+        <div
+          role="note"
+          className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 sm:px-6"
+        >
+          <AlertTriangle className="size-4 shrink-0" />
+          <p className="min-w-48 flex-1">
+            Unredacted version. It has not been through privacy redaction and
+            can contain names, paths, credentials or other private details from
+            your session. Labels made here can be completed and submitted.
+          </p>
+          {located.generation.redacted && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={editorTarget !== null}
+              onClick={() => switchVersion('redacted')}
+            >
+              Switch to redacted
+            </Button>
+          )}
         </div>
       )}
+
+      <AlertDialog
+        open={unredactedPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open && unredactedPrompt) {
+            const resolve = unredactedPrompt;
+            setUnredactedPrompt(null);
+            resolve(false);
+          }
+        }}
+      >
+        <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Edit the unredacted version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This version has not been through privacy redaction and can
+              contain names, paths, credentials or other private details from
+              your session. If you complete and submit it, that text is included
+              in the submission and is sent to the model you choose for
+              cross-session insights. Label the redacted version unless you need
+              the original wording.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => answerUnredacted(false)}>
+              {located?.kind === 'session' && located.generation.redacted
+                ? 'Switch to redacted'
+                : 'Cancel'}
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={() => answerUnredacted(true)}
+            >
+              Edit unredacted
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingPrivacy !== null}
+        onOpenChange={(open) => {
+          if (!open && !privacySaving) {
+            setPendingPrivacy(null);
+            setPrivacyOutcome('cancelled');
+          }
+        }}
+      >
+        <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove this information and delete the review history?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const earlier = active.version ?? active.revisionCount;
+                return `This is a privacy request. Saving it replaces this review with the cleaned version and ${
+                  earlier > 0
+                    ? `permanently deletes all ${earlier} earlier saved ${earlier === 1 ? 'version' : 'versions'}, including earlier requests and agent answers`
+                    : 'deletes the saved original it started from'
+                }. The cleaned version becomes the new starting version, and the review gets a new address. This cannot be undone.`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingPrivacy?.privacy && (
+            <div className="space-y-2 text-sm">
+              <p>{pendingPrivacy.answer}</p>
+              <p className="text-xs text-muted-foreground">
+                {(() => {
+                  const cleaned = applyPrivacy(
+                    active,
+                    pendingPrivacy.privacy,
+                    pendingPrivacy.cards,
+                    pendingPrivacy.removeCards,
+                  );
+                  return [
+                    cleaned.removedCards.length
+                      ? `deletes cards ${cleaned.removedCards.join(', ')}`
+                      : '',
+                    cleaned.changedLines.length
+                      ? `Summary lines ${cleaned.changedLines.join(', ')}`
+                      : '',
+                    cleaned.changedCards.length
+                      ? `cards ${cleaned.changedCards.join(', ')} (back to Pending)`
+                      : '',
+                    pendingPrivacy.privacy.projectName !== null &&
+                    pendingPrivacy.privacy.projectName !== active.projectName
+                      ? 'the project name'
+                      : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                })()}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Not changed:{' '}
+                {located?.kind === 'session'
+                  ? `the ${located.version === 'redacted' ? 'unredacted' : 'redacted'} version of this trajectory, `
+                  : ''}
+                earlier submissions and exports, and the run files on this
+                computer.
+              </p>
+            </div>
+          )}
+          {privacyError && (
+            <p role="alert" className="text-sm text-destructive">
+              {privacyError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={privacySaving}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={privacySaving}
+              onClick={() => void confirmPrivacy()}
+            >
+              {privacySaving ? 'Saving…' : 'Delete history and save'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Sheet open={submitOpen} onOpenChange={setSubmitOpen}>
+        <SheetContent className="h-dvh max-h-dvh gap-0 overflow-hidden data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+          <SheetHeader className="shrink-0 border-b px-6 py-5">
+            <SheetTitle>Submit trajectories</SheetTitle>
+            <SheetDescription>
+              Every completed trajectory is checked (its redacted version when
+              both were completed), and so are completed global insights.
+            </SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1 overscroll-contain">
+            <div className="p-6">
+              {submitOpen && (
+                <SubmitForm
+                  reviews={reviews}
+                  runs={runs}
+                  submissions={submissions}
+                  onSubmitted={(id) =>
+                    window.location.assign(`/submissions?id=${id}`)
+                  }
+                />
+              )}
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+
+      <NextTrajectoryDialog
+        key={completedCount}
+        open={completedSession !== null}
+        onOpenChange={(open) => {
+          if (!open) setCompletedSession(null);
+        }}
+        options={
+          completedSession ? unfinishedAfter(index, completedSession) : []
+        }
+        onOpen={(session) => {
+          const review = sessionReview(session);
+          if (review) void chooseReview(review.id);
+        }}
+      />
+
+      <Sheet open={sidebarSheet} onOpenChange={setSidebarSheet}>
+        <SheetContent side="left" className="w-[300px] gap-0 p-0">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Trajectories</SheetTitle>
+            <SheetDescription>Open another trajectory.</SheetDescription>
+          </SheetHeader>
+          <TrajectorySidebar
+            index={index}
+            activeId={active.id}
+            disabled={editorTarget !== null}
+            onOpen={(id) => void openFromSidebar(id)}
+            inSheet
+          />
+        </SheetContent>
+      </Sheet>
+
+      <div className="lg:flex lg:min-h-0 lg:flex-1">
+        {sidebarOpen && (
+          <aside
+            id="trajectory-sidebar"
+            className="hidden w-[280px] shrink-0 border-r bg-background lg:flex lg:min-h-0 lg:flex-col"
+          >
+            <TrajectorySidebar
+              index={index}
+              activeId={active.id}
+              disabled={editorTarget !== null}
+              onOpen={(id) => void openFromSidebar(id)}
+            />
+          </aside>
+        )}
+        <div className="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+          {viewMode === 'cards' ? (
+            <div className="flex min-h-0 flex-col bg-[color:var(--sidebar)] lg:flex-1">
+              <ReviewQueue
+                review={active}
+                insight={selected}
+                index={Math.max(
+                  0,
+                  active.insights.findIndex((item) => item.id === selected?.id),
+                )}
+                remaining={queue.undecided}
+                structured={
+                  active.format === 'v5' || selected?.authorship === 'reviewer'
+                }
+                skillCandidate={skillCandidates}
+                evidenceLabels={globalEvidenceLabels}
+                hasPrevious={
+                  !!queuePosition &&
+                  neighbour([active], queuePosition, -1) !== null
+                }
+                hasNext={
+                  !!queuePosition &&
+                  neighbour([active], queuePosition, 1) !== null
+                }
+                completable={completable && saveState !== 'saving'}
+                disabled={editorTarget !== null}
+                onStatus={decide}
+                onEdit={() => selected && openEditor('insight', selected.id)}
+                onDelete={() =>
+                  selected &&
+                  requestDelete({ kind: 'insight', id: selected.id })
+                }
+                onPrevious={() => step(-1)}
+                onNext={() => step(1)}
+                onOpenEvidence={openEvidence}
+                onComplete={() => void completeReview()}
+                onSubmit={() => void openSubmit()}
+                tab={cardsTab}
+                onTabChange={setCardsTab}
+                summary={summaryBody}
+                summaryCount={active.summaryLines.length}
+              />
+            </div>
+          ) : (
+            <div className="grid min-h-0 grid-cols-1 lg:flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]">
+              <section
+                className="flex min-h-0 min-w-0 flex-col border-b lg:border-b-0 lg:border-r"
+                aria-labelledby="summary-heading"
+              >
+                <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
+                  <div className="flex items-center gap-2">
+                    <FileText className="size-4 text-muted-foreground" />
+                    <h1 id="summary-heading" className="text-sm font-medium">
+                      {active.reviewLevel === 'global'
+                        ? 'Source summaries'
+                        : 'Summary'}
+                    </h1>
+                    <span className="text-sm text-muted-foreground">
+                      {active.summaryLines.length}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    onClick={() => openCreate('summary')}
+                  >
+                    <Plus data-icon="inline-start" />
+                    Add line
+                  </Button>
+                </div>
+                <ScrollArea className="h-[min(560px,60dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
+                  {summaryBody}
+                </ScrollArea>
+              </section>
+
+              <section
+                className="flex min-h-0 min-w-0 flex-col bg-[color:var(--sidebar)]"
+                aria-labelledby="insights-heading"
+              >
+                <div className="flex h-11 shrink-0 items-center justify-between border-b px-4 sm:px-5">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="size-4 text-muted-foreground" />
+                    <h2 id="insights-heading" className="text-sm font-medium">
+                      {active.reviewLevel === 'global'
+                        ? 'Global insight cards'
+                        : 'Insight cards'}
+                    </h2>
+                    <span className="text-sm text-muted-foreground">
+                      {active.insights.length}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    onClick={() => openCreate('insight')}
+                  >
+                    <Plus data-icon="inline-start" />
+                    Add insight
+                  </Button>
+                </div>
+                <ScrollArea className="h-[min(620px,65dvh)] lg:h-auto lg:min-h-0 lg:flex-1">
+                  {active.insights.length ? (
+                    <div className="space-y-3 p-4 pb-44 sm:p-5 sm:pb-44">
+                      {active.insights.map((insight) => (
+                        <InsightCard
+                          key={insight.id}
+                          insight={insight}
+                          evidenceLabels={
+                            active.reviewLevel === 'global'
+                              ? Object.fromEntries(
+                                  active.summaryLines.map((line) => [
+                                    line.id,
+                                    line.sourceId ?? line.id,
+                                  ]),
+                                )
+                              : undefined
+                          }
+                          skillCandidate={skillCandidates}
+                          structured={
+                            active.format === 'v5' ||
+                            insight.authorship === 'reviewer'
+                          }
+                          selected={insight.id === selected?.id}
+                          onSelect={() => setSelectedInsight(insight.id)}
+                          onEvidence={(lineId) =>
+                            jumpToEvidence(insight.id, lineId)
+                          }
+                          onEdit={() => openEditor('insight', insight.id)}
+                          onDelete={() => {
+                            setSelectedInsight(insight.id);
+                            requestDelete({ kind: 'insight', id: insight.id });
+                          }}
+                          onStatus={(status) =>
+                            guard(() => setInsightStatus(insight.id, status))
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      label="No supported Insights retained"
+                      onAdd={() => openCreate('insight')}
+                    />
+                  )}
+                </ScrollArea>
+              </section>
+            </div>
+          )}
+        </div>
+      </div>
 
       <Sheet
         open={Boolean(editorTarget)}

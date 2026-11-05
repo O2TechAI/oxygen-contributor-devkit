@@ -24,13 +24,18 @@ Read no other inputs, repository files, prior runs, or sibling trajectories.
 Use local file tools only, without network access or further subagents.
 Keep the input and manifest unchanged. These are task instructions, not OS isolation.
 
-First measure the source size and plan reads that fit the output limits
-of the host tools described in the host notes above. Inspect the entire source through
-tool output in consecutive chunks, keeping track of your position. If output is
-truncated, reread the missing portion in smaller chunks before continuing. Use the
-working summary to retain progress and findings across compaction when needed.
-Report completion only after inspecting the whole source, or report an error if
-reading remains blocked.
+Read the frozen source only through the source reader whose fixed JSON argv prefix
+appears after the task prompt. Append `plan --stage summary`, or `part N --stage summary`,
+as separate argv entries; the reader already knows which run to read. `plan` reports the number of
+parts; read parts 1 through the last in order, one part per command. Each part fits
+one tool output and prints whole between a header and an end marker. Parts end at
+line breaks unless one line is longer than a part, in which case the next part's
+header says it continues that line. The reader records every part you read, and the
+parent accepts the summary only when every part has been read in this stage. The
+source's length is not a reason to stop: write source-grounded notes to the working
+summary as you go, and after compaction run `plan --stage summary` again to find the
+next unread part. Report completion only after reading every part, or report an
+error if the reader itself fails.
 
 Finish with only
 {"status":"complete"} or {"status":"error","reason":"a short content-free explanation"}.

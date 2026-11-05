@@ -92,3 +92,52 @@ void test('stale version blocks every retry and retains new drafts until explici
   await queue.flush();
   assert.deepEqual(attempted, [1, 3]);
 });
+
+void test('a committed value is saved as its own write after earlier edits and before later ones', async () => {
+  const saved: string[] = [];
+  const queue = new Autosave<string>(
+    async (value) => {
+      saved.push(value);
+    },
+    () => {},
+    1000,
+  );
+  queue.enqueue('accept I001');
+  const committed = queue.commit('agent edit');
+  queue.enqueue('accept I002');
+  assert.equal(await committed, true);
+  assert.equal(await queue.flush(), true);
+  assert.deepEqual(saved, ['accept I001', 'agent edit', 'accept I002']);
+});
+
+void test('a commit made while an earlier edit is saving keeps its place in line', async () => {
+  const saved: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queue = new Autosave<string>(
+    async (value) => {
+      saved.push(value);
+      if (value === 'first') await gate;
+    },
+    () => {},
+    1000,
+  );
+  queue.enqueue('first');
+  const first = queue.flush();
+  queue.enqueue('typing');
+  const committed = queue.commit('agent edit');
+  queue.enqueue('accept');
+  queue.enqueue('accept and decline');
+  release();
+  assert.deepEqual(await Promise.all([first, committed]), [true, true]);
+  assert.equal(await queue.flush(), true);
+  assert.deepEqual(saved, [
+    'first',
+    'typing',
+    'agent edit',
+    'accept and decline',
+  ]);
+  assert.equal(queue.hasPending, false);
+});

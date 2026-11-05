@@ -195,12 +195,13 @@ export function isValidV5Review(review: Review, payload: ReviewSavePayload) {
         insight.status === 'rejected') &&
       insight.evidence.every((id) => contentIds.has(id)),
   );
+  // Either version of a trajectory (redacted or unredacted) can be completed,
+  // and only once every card has a decision.
   const canComplete =
     payload.status !== 'completed' ||
-    ((review.privacyStatus === 'redacted' || review.reviewLevel === 'global') &&
-      payload.insights.every(
-        (insight) =>
-          insight.status === 'accepted' || insight.status === 'rejected',
-      ));
+    payload.insights.every(
+      (insight) =>
+        insight.status === 'accepted' || insight.status === 'rejected',
+    );
   return validLines && validKinds && validCards && canComplete;
 }

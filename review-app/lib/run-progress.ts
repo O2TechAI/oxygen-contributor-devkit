@@ -1,4 +1,6 @@
 import type {
+  InsightJob,
+  InsightStage,
   RunPhase,
   Stage,
   TrajectoryState,
@@ -123,6 +125,10 @@ const REASONS: [RegExp, string][] = [
     /no_sessions_found/,
     'The selected sessions were not found on this computer.',
   ],
+  [
+    /insufficient_distinct_trajectories/,
+    'Cross-session insights need at least two different trajectories.',
+  ],
 ];
 
 export function describeError(error: string | null) {
@@ -146,4 +152,32 @@ export function phaseText(phase: RunPhase) {
     default:
       return 'Failed';
   }
+}
+
+export type InsightStep = 'prepare' | InsightStage;
+
+export const INSIGHT_STEPS: { id: InsightStep; label: string }[] = [
+  { id: 'prepare', label: 'Preparing the submission' },
+  { id: 'synthesis', label: 'Finding methods shared across sessions' },
+  { id: 'humanize', label: 'Rewriting for readability' },
+];
+
+/** Where a cross-session job is on one of its three steps. */
+export function insightStepState(
+  job: InsightJob,
+  step: InsightStep,
+): StepState {
+  const done = job.stagesDone ?? [];
+  const active = isActivePhase(job.phase);
+  if (step === 'prepare') {
+    if (job.stage || done.length || job.phase === 'done') return 'done';
+    if (active) return 'active';
+    return job.phase === 'failed' ? 'failed' : 'waiting';
+  }
+  if (done.includes(step) || job.phase === 'done') return 'done';
+  if (job.stage === step) {
+    if (active) return 'active';
+    if (job.phase === 'failed') return 'failed';
+  }
+  return 'waiting';
 }
