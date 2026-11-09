@@ -132,6 +132,19 @@ even when they share a project name such as `example-project`.
 
 Node.js 22.13 or newer is required.
 
+On Windows PowerShell, run `.\oxygen.ps1` from the toolkit root. Set `OXYGEN_NODE`
+to a Node.js executable if the default Node is older than 22.13. The launcher tries
+`python` before `python3` on Windows and passes the selected interpreter to the
+bridge. `OXYGEN_PYTHON` overrides detection.
+
+Session snapshots on Windows retain the destination directory's inherited ACLs.
+POSIX 0600/0700 mode bits do not verify Windows access control. Workers preserve
+those ACLs instead of attempting chmod, ownership or ACL changes. Choose a run
+storage directory whose ACLs provide the access you intend. Reparse-point sources
+are rejected on the opened file handle; frozen-prefix hash and metadata checks
+remain enabled on both platforms.
+
+
 ```bash
 npm ci
 npm run db:local:init

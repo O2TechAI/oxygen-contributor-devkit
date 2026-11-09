@@ -29,18 +29,36 @@ if (major < 22 || (major === 22 && minor < 13)) {
     `Node.js 22.13 or newer is required (this is ${process.versions.node}).`,
   );
 }
-const python = process.env.OXYGEN_PYTHON || 'python3';
-const check = spawnSync(
-  python,
-  ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'],
-  { stdio: 'ignore' },
+const candidates = process.env.OXYGEN_PYTHON
+  ? [process.env.OXYGEN_PYTHON]
+  : process.platform === 'win32'
+    ? ['python', 'python3']
+    : ['python3', 'python'];
+const python = candidates.find(
+  (candidate) =>
+    spawnSync(
+      candidate,
+      ['-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'],
+      { stdio: 'ignore', timeout: 5000, windowsHide: true },
+    ).status === 0,
 );
-if (check.status !== 0)
-  fail('Python 3.10 or newer is required (python3 not found or too old).');
+if (!python)
+  fail(
+    'Python 3.10 or newer is required. Set OXYGEN_PYTHON to its executable.',
+  );
 
 if (!existsSync(join(app, 'node_modules'))) {
   console.log('Installing dependencies (first run only)…');
-  const install = spawnSync('npm', ['ci'], { cwd: app, stdio: 'inherit' });
+  const npmCli =
+    process.env.npm_execpath ||
+    join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
+  if (process.platform === 'win32' && !existsSync(npmCli))
+    fail('Run npm ci with Node.js 22.13+ before starting Oxygen.');
+  const install = spawnSync(
+    process.platform === 'win32' ? process.execPath : 'npm',
+    process.platform === 'win32' ? [npmCli, 'ci'] : ['ci'],
+    { cwd: app, stdio: 'inherit', windowsHide: true },
+  );
   if (install.status !== 0) fail('npm ci failed.');
 }
 
@@ -68,6 +86,8 @@ const token = randomBytes(24).toString('hex');
 const environment = {
   ...process.env,
   OXYGEN_HOME: home,
+  OXYGEN_PYTHON: python,
+  PYTHONUTF8: '1',
   OXYGEN_REVIEW_DB:
     process.env.OXYGEN_REVIEW_DB || join(home, 'reviews.sqlite'),
   OXYGEN_AGENT_BRIDGE_TOKEN: token,
@@ -84,6 +104,7 @@ const children = [
       cwd: app,
       env: environment,
       stdio: ['ignore', 'ignore', 'inherit'],
+      windowsHide: true,
     },
   ),
   spawn(
@@ -98,7 +119,12 @@ const children = [
       String(appPort),
       '--strictPort',
     ],
-    { cwd: app, env: environment, stdio: ['ignore', 'ignore', 'inherit'] },
+    {
+      cwd: app,
+      env: environment,
+      stdio: ['ignore', 'ignore', 'inherit'],
+      windowsHide: true,
+    },
   ),
 ];
 

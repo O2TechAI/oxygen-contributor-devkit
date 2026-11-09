@@ -93,7 +93,7 @@ function exec(file: string, args: string[], timeout = 15000) {
     execFile(
       file,
       args,
-      { timeout, maxBuffer: 16 * 1024 * 1024 },
+      { timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
       (error, stdout) => resolve({ ok: !error, stdout: String(stdout) }),
     );
   });
@@ -185,6 +185,7 @@ function runner(args: string[], timeout = 120_000) {
       {
         timeout,
         maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
       },
       (error, stdout, stderr) => {
@@ -534,6 +535,7 @@ async function startRun(request: StartRequest) {
   try {
     const child = spawn(PYTHON, [RUNNER, 'run', '--run-dir', directory], {
       detached: true,
+      windowsHide: true,
       stdio: ['ignore', log, log],
       env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
     });
@@ -548,7 +550,14 @@ async function startRun(request: StartRequest) {
 async function cancelRun(id: string) {
   const state = await runState(id);
   if (!state) return false;
-  if (state.pid && alive(state.pid)) process.kill(state.pid, 'SIGTERM');
+  if (state.pid && alive(state.pid)) {
+    if (process.platform === 'win32') {
+      // Windows SIGTERM terminates Python immediately, bypassing worker cleanup.
+      await writeFile(join(RUNS, id, 'cancel.request'), '', { mode: 0o600 });
+    } else {
+      process.kill(state.pid, 'SIGTERM');
+    }
+  }
   return true;
 }
 
@@ -876,6 +885,7 @@ async function startGeneration(id: string, body: unknown) {
       PYTHON,
       [RUNNER, 'cross-session', '--job-dir', directory],
       {
+        windowsHide: true,
         detached: true,
         stdio: ['ignore', log, log],
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
@@ -892,7 +902,15 @@ async function startGeneration(id: string, body: unknown) {
 async function cancelGeneration(id: string, job: string) {
   const state = await jobState(id, job);
   if (!state) return false;
-  if (state.pid && alive(state.pid)) process.kill(state.pid, 'SIGTERM');
+  if (state.pid && alive(state.pid)) {
+    if (process.platform === 'win32') {
+      await writeFile(
+        join(submissionDir(id), 'generations', job, 'cancel.request'),
+        '',
+        { mode: 0o600 },
+      );
+    } else process.kill(state.pid, 'SIGTERM');
+  }
   return true;
 }
 
@@ -957,7 +975,12 @@ function run(
 ) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>(
     (resolve, reject) => {
-      const child = spawn(file, args, { cwd, env, stdio: 'pipe' });
+      const child = spawn(file, args, {
+        cwd,
+        env,
+        stdio: 'pipe',
+        windowsHide: true,
+      });
       let stdout = '';
       let stderr = '';
       const stop = () => child.kill('SIGTERM');

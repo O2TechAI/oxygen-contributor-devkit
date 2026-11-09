@@ -32,7 +32,7 @@ CLAUDE_HOST_NOTES = (
     "exactly as given. Choose `--limit` of at most 20000 bytes so each read fits one Bash "
     "output; wherever these instructions mention Codex `exec_command` or `functions.exec` "
     "output limits, apply this limit instead. Read other run files with the Read tool using "
-    "`offset` and `limit`. Write output files with Write, then set mode 0600 with "
+    "`offset` and `limit`. Write output files with Write, on POSIX set mode 0600 with "
     "`chmod 600` in Bash. Do not use the Agent, WebFetch, or WebSearch tools. Your final "
     "message is the task result returned to the parent.\n\n"
 )
@@ -264,7 +264,7 @@ def prepare(input_dir, run, *, host=None, model=None, effort=None):
         write(run / "input_validation.json", {"status": "valid", "counts": corpus["counts"],
                                               "duplicates": corpus["duplicates"],
                                               "actualExportFileCount": len(corpus["files"])})
-        frozen = {str(path.relative_to(run)): digest(regular(path)) for path in sorted(run.rglob("*"))
+        frozen = {path.relative_to(run).as_posix(): digest(regular(path)) for path in sorted(run.rglob("*"))
                   if path.is_file()}
         manifest = {"format": "oxygen-cross-session-run/v1", "createdAt": now(),
                     "inputDirectory": str(input_dir), "runDirectory": str(run),
@@ -451,7 +451,7 @@ def accept(run, worker_id, worker_status, stage="synthesis"):
             for name in names:
                 os.chmod(directory / name, 0o600)
             hashes = dict(state.get("outputHashes", {}))
-            hashes.update({str((directory / name).relative_to(run)): digest(regular(directory / name))
+            hashes.update({(directory / name).relative_to(run).as_posix(): digest(regular(directory / name))
                            for name in names})
             required = "humanize" in load(run / "config.json").get("stageOrder", [])
             current["status"] = "accepted"
@@ -475,6 +475,8 @@ def accept(run, worker_id, worker_status, stage="synthesis"):
 
 
 def main(argv=None):
+    if os.name == "nt":
+        sys.stdout.reconfigure(newline="\n")
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     prep = commands.add_parser("prepare")
@@ -513,7 +515,7 @@ def main(argv=None):
             if Path(__file__).resolve() != helper.resolve():
                 manifest = load(run / "manifest.json")
                 for name, sha in manifest["frozenHashes"].items():
-                    if name.startswith("protocol/") and digest(regular(private_relative(run, name))) != sha:
+                    if name.replace("\\", "/").startswith("protocol/") and digest(regular(private_relative(run, name))) != sha:
                         raise ValueError(f"frozen_file_changed: {name}")
                 return subprocess.run([sys.executable, str(helper), *(argv or sys.argv[1:])]).returncode
         if args.command == "prepare":

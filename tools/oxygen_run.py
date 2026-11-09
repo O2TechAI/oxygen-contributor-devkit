@@ -374,8 +374,10 @@ def suggested_sample(count: int) -> list[int]:
 
 
 def workspace_sessions(workspace: str) -> list[dict]:
-    root = str(Path(workspace).expanduser())
-    members = sorted((s for s in scan() if project_root(s["cwd"]) == root), key=lambda s: s["started"])
+    # Git prints forward slashes on Windows; requests may contain either form.
+    root = CODEX.normalized(workspace)
+    members = sorted((s for s in scan() if CODEX.normalized(project_root(s["cwd"])) == root),
+                     key=lambda s: s["started"])
     chosen = set(suggested_sample(len(members)))
     return [{
         "source": s["source"], "id": s["id"], "started": s["started"], "bytes": s["bytes"],
@@ -526,8 +528,10 @@ class Workers:
         pending: dict[str, tuple] = {}
 
         async def start(worker_id: str, command: list[str], environment: dict, prompt: str):
+            options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+                       if os.name == "nt" else {"start_new_session": True})
             process = await asyncio.create_subprocess_exec(
-                *command, cwd=str(cwd), env=environment, start_new_session=True,
+                *command, cwd=str(cwd), env=environment, **options,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             self.live[worker_id] = process
             return process, asyncio.create_task(process.communicate(prompt.encode()))
@@ -599,8 +603,13 @@ class Workers:
         for key, process in list(self.live.items()):
             if worker_id in (None, key) and process.returncode is None:
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                       capture_output=True, timeout=10,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        os.killpg(process.pid, signal.SIGTERM)
+                except (OSError, subprocess.SubprocessError):
                     pass
 
 
@@ -664,7 +673,7 @@ def _freeze_merged(session: dict, paths: list[Path], snapshots: Path) -> Path:
     try:
         seen: set[bytes] = set()
         with os.fdopen(fd, "w+b") as destination:
-            os.fchmod(destination.fileno(), 0o600)
+            CODEX._private_fd(destination.fileno())
             for path in paths:
                 for line in CODEX.complete_lines(path):
                     if session["source"] == "claude":
@@ -734,12 +743,21 @@ async def run(directory: Path, workers_factory=Workers) -> int:
             if task is not asyncio.current_task() and getattr(task, "_oxygen_job", False):
                 task.cancel()
 
+    fallback_signals = []
     for name in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(name, cancel)
+        try:
+            loop.add_signal_handler(name, cancel)
+        except NotImplementedError:
+            previous = signal.getsignal(name)
+            signal.signal(name, lambda signum, frame: loop.call_soon_threadsafe(cancel))
+            fallback_signals.append((name, previous))
 
     async def beat() -> None:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
+            if (directory / "cancel.request").exists():
+                cancel()
+                return
             state.save()
 
     heartbeat = asyncio.create_task(beat())
@@ -840,6 +858,8 @@ async def run(directory: Path, workers_factory=Workers) -> int:
         return 1
     finally:
         heartbeat.cancel()
+        for name, previous in fallback_signals:
+            signal.signal(name, previous)
 
 
 # ---------------------------------------------------------------------------
@@ -926,12 +946,21 @@ async def cross_session(job_dir: Path, workers_factory=Workers) -> int:
         workers.stop()
         main_task.cancel()
 
+    fallback_signals = []
     for name in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(name, cancel)
+        try:
+            loop.add_signal_handler(name, cancel)
+        except NotImplementedError:
+            previous = signal.getsignal(name)
+            signal.signal(name, lambda signum, frame: loop.call_soon_threadsafe(cancel))
+            fallback_signals.append((name, previous))
 
     async def beat() -> None:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
+            if (job_dir / "cancel.request").exists():
+                cancel()
+                return
             state.save()
 
     async def give_up() -> None:
@@ -993,6 +1022,8 @@ async def cross_session(job_dir: Path, workers_factory=Workers) -> int:
         return 1
     finally:
         heartbeat.cancel()
+        for name, previous in fallback_signals:
+            signal.signal(name, previous)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,6 +1,7 @@
 import base64
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -317,7 +318,8 @@ class StripToolOutputsTests(unittest.TestCase):
             self.assertEqual(len(payload["replacement_history"]), 2)
             self.assertEqual(payload["replacement_history"][0], {"type": "compaction"})
             self.assertEqual(payload["message"], "keep summary")
-            self.assertEqual(first.stat().st_mode & 0o777, 0o600)
+            if os.name != 'nt':
+                self.assertEqual(first.stat().st_mode & 0o777, 0o600)
 
     def test_encrypted_counts_exclude_removed_output_carriers(self):
         records = [

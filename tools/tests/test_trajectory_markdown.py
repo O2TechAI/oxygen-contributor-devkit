@@ -2,6 +2,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -123,8 +124,9 @@ class MarkdownExportTests(unittest.TestCase):
         self.assertIn("````text\n" + tool_input, text)
         self.assertEqual(result["markdown"]["roles"]["tool call"], 2)
         self.assertEqual(result["markdown"]["sha256"], hashlib.sha256(self.markdown.read_bytes()).hexdigest())
-        for path in (self.output, self.markdown, self.report):
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        if os.name != 'nt':
+            for path in (self.output, self.markdown, self.report):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_mixed_first_user_message_keeps_only_human_blocks(self):
         payload = {"type": "message", "role": "user", "content": [

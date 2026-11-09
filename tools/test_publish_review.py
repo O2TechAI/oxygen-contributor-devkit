@@ -65,7 +65,7 @@ class PublishReviewTest(unittest.TestCase):
             files = {"summary.md": "Context.\n", "summary_labeled.md": "L001 Context.\n",
                      "insight.md": "humanized content"}
             for name, data in files.items():
-                (run / "humanize" / name).write_text(data)
+                (run / "humanize" / name).write_bytes(data.encode('utf-8'))
                 (run / "insight" / name).write_text("original extraction")
             stage = {"status": "complete", "outputs": {"sha256": {
                 name: hashlib.sha256(data.encode()).hexdigest() for name, data in files.items()}}}

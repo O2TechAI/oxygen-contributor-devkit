@@ -1,5 +1,7 @@
 # Fixed insight worker contract
 
+File permissions are platform-specific. On POSIX, use mode 0600 for output files. On Windows, preserve the inherited ACLs of the host-created run directory. Do not run chmod, icacls, Set-Acl, WSL, or change ownership to emulate POSIX mode bits. A Windows stat mode such as 0666 does not describe the ACL and is not a task failure. Report a permission error only when a required file cannot actually be read or written.
+
 The final JSON object is data; `input_path` is the only per-item parameter.
 Derive RUN_DIR by appending `.oxygen-agents` to that path. The input path is only
 a directory selector; do not open it.
@@ -58,7 +60,7 @@ context before checking its category contribution and evidence.
 Create RUN_DIR/insight/insight.md using the appended card format, with type labels
 and evidence IDs from the final working summary. Write only the Markdown files;
 the parent validates their fields, citation targets, and integrity.
-Keep exactly these three files in the insight directory, all with mode 0600.
+Keep exactly these three files in the insight directory, all with POSIX mode 0600.
 You may read your outputs to validate them. Keep the source, RUN_DIR/summary audit
 copies, all other stage directories, and manifest unchanged.
 If no useful skill candidate with a supported example remains, create an empty insight file.
