@@ -80,7 +80,7 @@ def freeze_source(stream, path, initial, metadata, snapshots):
     temporary = Path(temp_name)
     try:
         with os.fdopen(fd, "w+b") as destination:
-            os.fchmod(destination.fileno(), 0o600)
+            CODEX._private_fd(destination.fileno())
             digest = CODEX._read_prefix(stream, length, destination)
             destination.flush()
             os.fsync(destination.fileno())
@@ -223,7 +223,7 @@ def collect(workspace, config_dirs=None, output_dir=None, dry_run=False):
         destination = output / "manifest.json"
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            os.fchmod(stream.fileno(), 0o600)
+            CODEX._private_fd(stream.fileno())
             json.dump(manifest, stream, indent=2, ensure_ascii=True)
             stream.write("\n")
             stream.flush()

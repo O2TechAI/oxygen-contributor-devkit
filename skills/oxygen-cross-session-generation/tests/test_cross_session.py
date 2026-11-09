@@ -44,7 +44,7 @@ Evidence: S001:L002, S002:L002
 
 
 def snapshot(root):
-    return {str(path.relative_to(root)): path.read_bytes()
+    return {path.relative_to(root).as_posix(): path.read_bytes()
             for path in root.rglob("*") if path.is_file()}
 
 
@@ -329,10 +329,11 @@ class CrossSessionLifecycleTests(unittest.TestCase):
             self.assertEqual((self.run / "inputs" / name).read_bytes(), raw)
         self.assertNotEqual(manifest["inputHashes"]["a/summary.md"], "f" * 64)
         self.assertEqual(snapshot(self.inputs), before)
-        self.assertEqual(stat.S_IMODE(self.run.stat().st_mode), 0o700)
-        for path in self.run.rglob("*"):
-            if path.is_file():
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(self.run.stat().st_mode), 0o700)
+            for path in self.run.rglob("*"):
+                if path.is_file():
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertTrue(CROSS.verify(self.run, check_originals=True)["originalsChecked"])
 
     def test_frozen_prompts_settings_and_dispatch_are_exact(self):

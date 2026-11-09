@@ -186,6 +186,12 @@ class DiscoveryTests(Environment):
         self.assertEqual(OXY.suggested_sample(3), [0, 1, 2])
         self.assertEqual(OXY.suggested_sample(10), [0, 5, 9])
 
+    def test_git_style_project_paths_match_native_windows_paths(self):
+        self.codex_file("r.jsonl", codex_session(str(self.work), "r", "Check path matching"))
+        with patch.object(OXY, "project_root", return_value=self.work.as_posix()):
+            sessions = OXY.workspace_sessions(str(self.work))
+        self.assertEqual([item["id"] for item in sessions], ["r"])
+
     def test_setup_text_is_not_used_as_a_title(self):
         path = self.claude_file("t.jsonl", [
             {"type": "user", "message": {"role": "user", "content": "<command-name>/clear</command-name>"},
@@ -231,7 +237,8 @@ class DiscoveryTests(Environment):
         claude = self.claude_file("a.jsonl", claude_session(str(self.work), "a", "First request"))
         first = sorted((s["source"], s["id"]) for s in OXY.scan())
         cache = self.root / "home" / "cache" / "session-headers.json"
-        self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
         with patch.object(OXY.CODEX, "open_source", side_effect=AssertionError("file reopened")):
             self.assertEqual(sorted((s["source"], s["id"]) for s in OXY.scan()), first)
         claude.write_bytes(jsonl(claude_session(str(self.work), "renamed", "First request, edited")))
@@ -287,6 +294,16 @@ class WorkerProcessTests(unittest.TestCase):
                                           "FAKE_CODEX_COUNT": str(self.root / "count")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        if os.name == "nt":
+            create_process = asyncio.create_subprocess_exec
+
+            async def run_python_fixture(*command, **options):
+                return await create_process(sys.executable, *command, **options)
+
+            launcher = patch.object(asyncio, "create_subprocess_exec", side_effect=run_python_fixture)
+            launcher.start()
+            self.addCleanup(launcher.stop)
+
 
     def run_worker(self, mode):
         workers = OXY.Workers("codex", self.root)
@@ -306,8 +323,9 @@ class WorkerProcessTests(unittest.TestCase):
         self.assertEqual((self.root / "count").read_text(), "3")
         [last] = (self.root / "logs").glob("trajectory-001-summary-codex-*.last.txt")
         self.assertEqual(json.loads(last.read_text()), {"status": "complete"})
-        self.assertEqual(last.stat().st_mode & 0o777, 0o600)
-        self.assertEqual((self.root / "logs").stat().st_mode & 0o777, 0o700)
+        if os.name != "nt":
+            self.assertEqual(last.stat().st_mode & 0o777, 0o600)
+            self.assertEqual((self.root / "logs").stat().st_mode & 0o777, 0o700)
         self.assertEqual(workers.unfinished, {})
 
     def test_other_failures_are_not_retried(self):
@@ -490,12 +508,46 @@ class RunTests(Environment):
         self.assertEqual(result["redaction"]["protocolVersion"], 9)
         self.assertIn("Check the export", result["humanize"]["insightMarkdown"])
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX mode bits; Windows uses inherited directory ACLs')
     def test_state_file_is_private(self):
         self.claude_file("a.jsonl", claude_session(str(self.work), "a", "Please fix a"))
         directory = self.start([{"source": "claude", "id": "a"}])
         self.execute(directory)
         self.assertEqual((directory / "state.json").stat().st_mode & 0o777, 0o600)
         self.assertEqual((directory / "trajectories").stat().st_mode & 0o777, 0o700)
+
+    def test_cancel_request_stops_active_work_and_records_cancelled_state(self):
+        self.claude_file('a.jsonl', claude_session(str(self.work), 'a', 'Cancelable session'))
+        directory = self.start([{'source': 'claude', 'id': 'a'}])
+        stopped = []
+
+        class WaitingWorkers(FakeWorkers):
+            def adapters(self, source):
+                dispatch, _ = super().adapters(source)
+                async def wait(worker):
+                    await asyncio.sleep(60)
+                return dispatch, wait
+
+            def stop(self):
+                stopped.append(True)
+
+        async def exercise():
+            task = asyncio.create_task(OXY.run(directory, workers_factory=WaitingWorkers))
+            for _ in range(200):
+                state = json.loads((directory / 'state.json').read_text()) if (directory / 'state.json').exists() else {}
+                if state.get('trajectories') and state['trajectories'][0].get('stage') == 'summary':
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                self.fail('The fixture worker did not start')
+            (directory / 'cancel.request').touch()
+            return await asyncio.wait_for(task, timeout=5)
+
+        self.assertEqual(asyncio.run(exercise()), 130)
+        state = json.loads((directory / 'state.json').read_text())
+        self.assertEqual(state['phase'], 'cancelled')
+        self.assertEqual(state['trajectories'][0]['status'], 'cancelled')
+        self.assertTrue(stopped)
 
 
 if __name__ == "__main__":
@@ -582,7 +634,10 @@ class FakeCrossWorkers:
 
         async def wait(worker_id):
             if self.mode == "cancel":
-                os.kill(os.getpid(), signal.SIGTERM)
+                if os.name == "nt":
+                    (self.workdir / "cancel.request").touch()
+                else:
+                    os.kill(os.getpid(), signal.SIGTERM)
                 await asyncio.sleep(30)
             await asyncio.sleep(0)
             return results[worker_id]

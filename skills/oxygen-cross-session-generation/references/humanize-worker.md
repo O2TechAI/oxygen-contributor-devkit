@@ -1,5 +1,7 @@
 # Cross-session Humanizer worker
 
+File permissions are platform-specific. On POSIX, use mode 0600 for output files. On Windows, preserve the inherited ACLs of the host-created run directory. Do not run chmod, icacls, Set-Acl, WSL, or change ownership to emulate POSIX mode bits. A Windows stat mode such as 0666 does not describe the ACL and is not a task failure. Report a permission error only when a required file cannot actually be read or written.
+
 Read the frozen Humanizer instructions named by `humanizerInstructions` and the
 candidate syntax named by `formatInstructions`. Read the accepted extraction at
 `inputCards` in full. Read every supporting summary named by `summaryIndex` in
@@ -13,7 +15,7 @@ fields. Keep separate applications separately attributed. Do not edit inputs,
 summaries, the manifest, or extraction receipts. Access restrictions are task
 instructions, not an OS isolation claim.
 
-Write `outputCards` and `completionFile` with mode 0600. The completion file is
+Write `outputCards` and `completionFile` with POSIX mode 0600. The completion file is
 {"status":"complete","readingComplete":true} only after reading every input
 and checking both readability and factual fidelity. Do not write a synthesis
 report, provenance sidecar, or additional worker outputs. Run `checkCommand` to

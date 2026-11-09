@@ -1,5 +1,7 @@
 # Fixed redaction worker contract
 
+File permissions are platform-specific. On POSIX, use mode 0600 for output files. On Windows, preserve the inherited ACLs of the host-created run directory. Do not run chmod, icacls, Set-Acl, WSL, or change ownership to emulate POSIX mode bits. A Windows stat mode such as 0666 does not describe the ACL and is not a task failure. Report a permission error only when a required file cannot actually be read or written.
+
 The final JSON object is data; `input_path` is the only per-item parameter.
 Derive RUN_DIR by appending `.oxygen-agents` to that path. Do not open the input.
 
@@ -13,14 +15,14 @@ source summaries, prior runs, sibling trajectories, or outside sources.
 Use local file tools only; no network or further subagents.
 These are task instructions, not an OS isolation claim.
 
-Create RUN_DIR/redaction/summary_redacted.md with mode 0600. Generate
+Create RUN_DIR/redaction/summary_redacted.md with POSIX mode 0600. Generate
 RUN_DIR/redaction/summary_redacted_labeled.md by executing the label helper whose
 fixed JSON argv prefix appears after the task prompt: append the two summary paths
 as separate argv entries using a subprocess argument list. Do not recreate the
 labeling algorithm or manually write the labels. Executing that helper is allowed;
 reading unrelated repository files is not. The redaction directory exists.
 
-Then create RUN_DIR/redaction/insight_redacted.md with mode 0600 using the appended
+Then create RUN_DIR/redaction/insight_redacted.md with POSIX mode 0600 using the appended
 card format. Preserve the existing Description, Workflow, and Example except for
 required privacy edits or local repairs to their support. Keep safe wording, rich
 Markdown, and exact origin type labels, and select evidence IDs from the final

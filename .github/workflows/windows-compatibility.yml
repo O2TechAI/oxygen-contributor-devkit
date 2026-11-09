@@ -1,0 +1,48 @@
+name: Cross-platform compatibility
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+          cache: npm
+          cache-dependency-path: review-app/package-lock.json
+      - run: python -m pip install zstandard
+      - run: python -m unittest discover -s tools/tests
+      - run: python -m unittest discover -s skills/oxygen-deterministic-trajectory-agents/tests
+      - run: python -m unittest discover -s skills/oxygen-cross-session-generation/tests
+      - run: python -m unittest discover -s tools -p test_publish_review.py
+      - run: npm ci --no-audit --no-fund
+        working-directory: review-app
+      - run: npm test
+        working-directory: review-app
+      - run: node --check scripts/oxygen.mjs
+        working-directory: review-app
+      - name: Check PowerShell entry point
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'oxygen.ps1'), [ref]$null, [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors) { throw ($parseErrors | Out-String) }

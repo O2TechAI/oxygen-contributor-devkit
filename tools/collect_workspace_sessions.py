@@ -49,8 +49,11 @@ def _reject_constant(value):
 
 @contextmanager
 def open_source(path):
-    # O_NONBLOCK prevents a replaced candidate FIFO from blocking the scan.
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    if os.name == "nt":
+        fd = _windows_source_fd(path)
+    else:
+        # O_NONBLOCK prevents a replaced candidate FIFO from blocking the scan.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise CollectionError("source_not_regular")
@@ -126,6 +129,60 @@ def read_source_metadata(stream, path, observed_bytes):
         return read_metadata(plain, HEADER_LIMIT)
 
 
+def _windows_source_fd(path):
+    """Open the final path itself, rejecting reparse points on the opened handle."""
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    class AttributeTagInfo(ctypes.Structure):
+        _fields_ = [("attributes", wintypes.DWORD), ("tag", wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                   wintypes.LPVOID, wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    # Allow the writer to append or rename while retaining the upstream prefix checks.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 7, None, 3, 0x00200000, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = AttributeTagInfo()
+        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if info.attributes & 0x400:
+            raise CollectionError("source_reparse_point")
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    return fd  # os.fdopen owns and closes the transferred handle.
+
+
+def _pread(fd, count, offset):
+    """Read without moving the buffered metadata reader's underlying position."""
+    read_at = getattr(os, "pread", None)
+    if read_at is not None:
+        return read_at(fd, count, offset)
+    # Each collector owns this descriptor; reads are not shared across threads.
+    position = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, offset, os.SEEK_SET)
+        return os.read(fd, count)
+    finally:
+        os.lseek(fd, position, os.SEEK_SET)
+
+
+def _private_fd(fd):
+    # Windows access is governed by the destination directory's inherited ACL.
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
+
+
 def read_metadata(stream, observed_bytes):
     raw = stream.readline(min(observed_bytes, HEADER_LIMIT) + 1)
     if len(raw) > min(observed_bytes, HEADER_LIMIT) or not raw.endswith(b"\n"):
@@ -165,7 +222,7 @@ def _complete_prefix_length(stream, observed_bytes):
     cursor = observed_bytes
     while cursor:
         start = max(0, cursor - CHUNK_SIZE)
-        block = os.pread(stream.fileno(), cursor - start, start)
+        block = _pread(stream.fileno(), cursor - start, start)
         if len(block) != cursor - start:
             raise CollectionError("source_truncated")
         newline = block.rfind(b"\n")
@@ -180,7 +237,7 @@ def _read_prefix(stream, length, destination=None):
     remaining = length
     while remaining:
         # Positional reads bypass the buffered metadata reader, including on verification.
-        block = os.pread(stream.fileno(), min(remaining, CHUNK_SIZE), length - remaining)
+        block = _pread(stream.fileno(), min(remaining, CHUNK_SIZE), length - remaining)
         if not block:
             raise CollectionError("source_truncated")
         digest.update(block)
@@ -210,7 +267,7 @@ def freeze_source(stream, path, initial, metadata, snapshots):
     temporary = Path(temp_name)
     try:
         with os.fdopen(fd, "w+b") as destination:
-            os.fchmod(destination.fileno(), 0o600)
+            _private_fd(destination.fileno())
             digest = _read_prefix(stream, length, destination)
             destination.flush()
             os.fsync(destination.fileno())
@@ -244,7 +301,7 @@ def freeze_compressed(stream, path, initial, metadata, snapshots):
     temporary = Path(temp_name)
     try:
         with os.fdopen(fd, "w+b") as destination:
-            os.fchmod(destination.fileno(), 0o600)
+            _private_fd(destination.fileno())
             with decompressed(stream) as plain:
                 shutil.copyfileobj(plain, destination, CHUNK_SIZE)
             destination.flush()
@@ -289,7 +346,7 @@ def complete_lines(path):
         digest = hashlib.sha256()
         offset, rest = 0, b""
         while offset < length:
-            block = os.pread(stream.fileno(), min(CHUNK_SIZE, length - offset), offset)
+            block = _pread(stream.fileno(), min(CHUNK_SIZE, length - offset), offset)
             if not block:
                 raise CollectionError("source_truncated")
             digest.update(block)
@@ -422,7 +479,7 @@ def collect(workspace, codex_home=None, output_dir=None, dry_run=False):
         destination = output / "manifest.json"
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            os.fchmod(stream.fileno(), 0o600)
+            _private_fd(stream.fileno())
             json.dump(manifest, stream, indent=2, ensure_ascii=True)
             stream.write("\n")
             stream.flush()

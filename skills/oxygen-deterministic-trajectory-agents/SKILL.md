@@ -217,7 +217,9 @@ Runs are stored at INPUT.oxygen-agents/ and contain:
   `trajectory.json` for JSON/JSONL inputs; `protocol/` snapshots, call records,
   and `manifest.json`.
 
-Directories use 0700; generated and accepted files use 0600. Report counts and paths
+On POSIX, directories use 0700 and generated and accepted files use 0600.
+On Windows, workers preserve the inherited ACLs of host-created run directories;
+POSIX stat mode bits are not ACL verification. Workers do not change ACLs or ownership. Report counts and paths
 without private prose. Only redaction-stage files have undergone privacy editing.
 Original-contributor review is required before release; structural acceptance does
 not establish factual fidelity or privacy completeness.

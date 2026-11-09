@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -85,7 +86,8 @@ class ReaderRunTests(unittest.TestCase):
         plan = json.loads(self.cli("plan", "--stage", "summary").stdout)
         self.assertEqual((plan["unread"], plan["next_unread_part"]), (0, None))
         receipts = self.run / "reading" / "summary.jsonl"
-        self.assertEqual(receipts.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(receipts.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.cli("part", self.count + 1, "--stage", "summary").returncode, 1)
         repository = subprocess.run([sys.executable, str(SCRIPTS / "read_source.py"), "plan", "--stage", "summary"],
                                     capture_output=True)

@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import tempfile
@@ -64,7 +65,8 @@ class LabelSummaryTests(unittest.TestCase):
             self.assertEqual(result["source_sha256"], hashlib.sha256(original).hexdigest())
             self.assertEqual(result["labeled_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
             self.assertEqual(source.read_bytes(), original)
-            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            if os.name != 'nt':
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
 
     def test_existing_output_same_input_and_symlinks_are_refused(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -78,7 +80,7 @@ class LabelSummaryTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"Keep existing output")
             link = Path(temporary) / "alias.md"
             link.symlink_to(source)
-            with self.assertRaises(OSError):
+            with self.assertRaises((OSError, ValueError)):
                 LABEL.label_file(link, Path(temporary) / "new.md")
             self.assertFalse((Path(temporary) / "new.md").exists())
 

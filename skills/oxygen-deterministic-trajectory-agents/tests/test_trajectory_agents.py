@@ -1,11 +1,13 @@
 import asyncio
 import importlib.util
 import json
+import os
 import re
 import shutil
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -86,13 +88,20 @@ class TrajectoryAgentsTests(unittest.TestCase):
         return RUN.accept(source, stage, worker_id=worker_id, worker_status="complete")
 
     def write_summary(self, summary=SUMMARY):
-        (self.run / "summary" / "summary.md").write_text(summary)
+        (self.run / "summary" / "summary.md").write_bytes(summary.encode('utf-8'))
 
     def finish_summary(self):
         RUN.prepare(self.source)
         RUN.issue_call(self.source, "summary")
         self.write_summary()
         return self.accept(self.source, "summary")
+
+    def test_new_run_freezes_windows_permission_instructions_for_each_stage(self):
+        RUN.prepare(self.source)
+        for stage in ("summary", "insight", "humanize", "redaction"):
+            template = (self.run / "protocol" / f"{stage}-template.md").read_text(encoding="utf-8")
+            self.assertIn("On Windows, preserve the inherited ACLs", template)
+            self.assertIn("is not a task failure", template)
 
     def finish_insight(self, insights=INSIGHTS):
         self.finish_summary()
@@ -137,7 +146,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.assertEqual(args, {"subagent_type": "general-purpose", "model": "opus", "run_in_background": True})
         self.assertIn("Claude Code Agent-tool worker", prompt)
         self.assertNotIn("exec_command", prompt)
-        self.assertIn((RUN.KIT / "prompts" / "summary.md").read_text(), prompt)
+        self.assertIn((RUN.KIT / "prompts" / "summary.md").read_bytes().decode('utf-8'), prompt)
         self.write_summary()
         self.accept(self.source, "summary")
         self.assertIn("prompt", RUN.issue_call(self.source, "insight"))
@@ -290,7 +299,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
             self.assertEqual({p.name for p in (self.run / stage).iterdir()}, set(RUN.STAGES[stage][1]))
 
     def test_supplied_label_commands_execute_identically_for_both_workers(self):
-        source = self.root / 'summary with "quotes".md'
+        source = self.root / ("summary with 'quotes'.md" if os.name == 'nt' else 'summary with "quotes".md')
         source.write_text(SUMMARY)
         results = []
         for stage in ("insight", "redaction"):
@@ -386,8 +395,9 @@ class TrajectoryAgentsTests(unittest.TestCase):
         self.assertEqual(result["insights"], 1)
         self.assertEqual(self.accept(self.source, "redaction"), result)
         self.assertEqual(self.source.read_bytes(), self.original)
-        for path in self.run.rglob("*"):
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700 if path.is_dir() else 0o600)
+        if os.name != 'nt':
+            for path in self.run.rglob("*"):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700 if path.is_dir() else 0o600)
 
     def test_rich_markdown_and_existing_summary_source(self):
         self.source = self.root / "source.MD"
@@ -470,7 +480,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
             call = RUN.issue_call(self.source, "summary")
         self.assertEqual(call["reasoning_effort"], "high")
         self.assertEqual(call["model"], "gpt-6.1-sol")
-        self.assertIn((RUN.KIT / "prompts/summary.md").read_text(), call["message"])
+        self.assertIn((RUN.KIT / "prompts/summary.md").read_bytes().decode('utf-8'), call["message"])
         manifest = json.loads((self.run / "manifest.json").read_bytes())
         manifest["configuration"]["protocol_version"] = 6
         RUN.save_manifest(self.run, manifest)
@@ -636,7 +646,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
             self.accept(self.source, "summary")
         call = RUN.issue_call(self.source, "insight")
         prefix = json.loads(call["message"].split("# Label helper command (JSON argv prefix)\n")[1].split("\n# ")[0])
-        self.assertEqual(prefix, ["python3", str(self.run / "protocol/label_summary_lines.py")])
+        self.assertEqual(prefix, [sys.executable, str(self.run / "protocol/label_summary_lines.py")])
         (self.run / "insight/insight.md").write_text(INSIGHTS)
         with patch.object(RUN.CARDS, "parse_cards", side_effect=AssertionError("use snapshot")):
             self.assertEqual(self.accept(self.source, "insight")["insights"], 1)
@@ -676,7 +686,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
             RUN.prepare(link)
 
     def test_json_documents_and_escaped_paths_are_supported(self):
-        source = self.root / 'strange "name"\n{input}.json'
+        source = self.root / ("strange 'name' {input}.json" if os.name == 'nt' else 'strange "name"\n{input}.json')
         source.write_text('[{"role":"user","text":"synthetic"}]')
         RUN.prepare(source)
         call = RUN.issue_call(source, "summary")

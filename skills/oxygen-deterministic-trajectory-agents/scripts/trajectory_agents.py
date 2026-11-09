@@ -64,7 +64,7 @@ HOST_NOTES = {
         "other files with the Read tool using `offset` and `limit`. Each call returns at most "
         "2000 lines and may truncate very long lines or reject a range that is too large; request "
         "fewer lines, or reread a long line with Bash (for example `sed -n 'Np' FILE | cut -c A-B`). "
-        "Write output files with Write or Edit, then set mode 0600 with `chmod 600` in Bash. "
+        "Write output files with Write or Edit, on POSIX set mode 0600 with `chmod 600` in Bash. "
         "Run the label helper with Bash. Do not use the Agent, WebFetch, or WebSearch tools. "
         "Your final message is the task result returned to the parent."
     ),

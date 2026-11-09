@@ -56,6 +56,41 @@ class CollectWorkspaceSessionsTests(unittest.TestCase):
     def snapshot(self, manifest, index=0):
         return self.output / manifest["sessions"][index]["snapshot_path"]
 
+    @unittest.skipUnless(os.name == "nt", "Windows ACL inheritance")
+    def test_windows_snapshot_retains_its_directory_access_rules(self):
+        self.source()
+        snapshot = self.snapshot(self.collect())
+        command = r'''
+        $ErrorActionPreference = 'Stop'
+        $file = [System.IO.File]::GetAccessControl($env:OXYGEN_TEST_SNAPSHOT)
+        $parent = [System.IO.Directory]::GetAccessControl(
+            [System.IO.Path]::GetDirectoryName($env:OXYGEN_TEST_SNAPSHOT)
+        )
+        function Rules($entries) {
+            @($entries | ForEach-Object {
+                "$($_.IdentityReference)|$($_.FileSystemRights)|$($_.AccessControlType)"
+            } | Sort-Object -Unique)
+        }
+        @{
+            protected = $file.AreAccessRulesProtected
+            inherited = @($file.Access | Where-Object { -not $_.IsInherited }).Count -eq 0
+            actual = @(Rules $file.Access)
+            expected = @(Rules ($parent.Access | Where-Object {
+                $_.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+            }))
+        } | ConvertTo-Json -Compress
+        '''
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            env={**os.environ, "OXYGEN_TEST_SNAPSHOT": str(snapshot)},
+            capture_output=True, text=True, check=True,
+        )
+        access = json.loads(result.stdout)
+        self.assertFalse(access["protected"])
+        self.assertTrue(access["inherited"])
+        self.assertTrue(access["expected"])
+        self.assertEqual(access["actual"], access["expected"])
+
     def test_workspace_membership_and_initial_metadata(self):
         self.source("exact")
         self.source("nested", cwd=self.workspace / "child" / "nested", source="vscode")
@@ -142,11 +177,33 @@ class CollectWorkspaceSessionsTests(unittest.TestCase):
         self.assertEqual(entry["bytes"], len(expected))
         self.assertEqual(entry["source_locations"][0]["omitted_trailing_bytes"], len(fragment))
         self.assertEqual(path.read_bytes(), expected + fragment)
-        for directory in (self.output, self.output / "snapshots"):
-            self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
-        for file in (self.snapshot(result), self.output / "manifest.json"):
-            self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+        if os.name != "nt":
+            for directory in (self.output, self.output / "snapshots"):
+                self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+            for file in (self.snapshot(result), self.output / "manifest.json"):
+                self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
         self.assertEqual(json.loads((self.output / "manifest.json").read_text()), result)
+
+    def test_positional_read_fallback_preserves_buffered_metadata_position(self):
+        path = self.source(body=b'{"next":1}\n')
+        with COLLECT.open_source(path) as stream:
+            header = stream.readline()
+            position = os.lseek(stream.fileno(), 0, os.SEEK_CUR)
+            with patch.object(COLLECT.os, "pread", None, create=True):
+                self.assertEqual(COLLECT._pread(stream.fileno(), len(header), 0), header)
+            self.assertEqual(os.lseek(stream.fileno(), 0, os.SEEK_CUR), position)
+            self.assertEqual(stream.readline(), b'{"next":1}\n')
+
+    def test_open_source_refuses_a_file_symlink(self):
+        path = self.source()
+        link = path.with_name('link.jsonl')
+        try:
+            link.symlink_to(path)
+        except OSError as error:
+            self.skipTest(f'Symlink creation unavailable: {error}')
+        with self.assertRaises((COLLECT.CollectionError, OSError)):
+            with COLLECT.open_source(link):
+                self.fail('A source symlink must never be followed')
 
     def test_mutations_during_capture(self):
         real_verify = COLLECT._verify_prefix
@@ -339,7 +396,8 @@ class CompressedRolloutTests(unittest.TestCase):
         self.assertEqual(entry["source_path"], str(target))
         self.assertEqual((self.output / entry["snapshot_path"]).read_bytes(), expected)
         self.assertEqual(entry["sha256"], hashlib.sha256(expected).hexdigest())
-        self.assertEqual(stat.S_IMODE((self.output / entry["snapshot_path"]).stat().st_mode), 0o600)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE((self.output / entry["snapshot_path"]).stat().st_mode), 0o600)
 
     def test_command_line_decoder_is_a_fallback(self):
         binary = shutil.which("zstd")

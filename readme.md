@@ -29,6 +29,10 @@ cd oxygen-contributor-devkit
 ./oxygen
 ```
 
+On Windows PowerShell, use `.\oxygen.ps1` with Node.js 22.13+ on PATH, or set
+`OXYGEN_NODE` to its executable. The launcher detects a working Python 3.10+
+interpreter; `OXYGEN_PYTHON` can select one explicitly.
+
 Oxygen opens in your browser and does the rest from there:
 
 1. **Projects** lists the folders where Codex or Claude Code recorded sessions on this

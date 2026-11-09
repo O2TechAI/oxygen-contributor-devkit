@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -74,7 +75,7 @@ class CollectTests(unittest.TestCase):
     def test_selects_main_sessions_by_first_recorded_cwd(self):
         inside = self.write("a.jsonl", session(str(self.workspace / "child"), "a"))
         # A later directory change does not move a session into the workspace.
-        moved = session("/elsewhere", "b") + [{**user("cd"), "cwd": str(self.workspace)}]
+        moved = session(str(self.root / "elsewhere"), "b") + [{**user("cd"), "cwd": str(self.workspace)}]
         self.write("b.jsonl", moved)
         self.write("a/subagents/agent-x.jsonl", session(str(self.workspace), "a"))
         self.write("agent-legacy.jsonl", session(str(self.workspace), "a"))
@@ -88,7 +89,8 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(entry["first_timestamp"], "2026-01-01T00:00:00Z")
         snapshot = self.root / "run" / entry["snapshot_path"]
         self.assertEqual(snapshot.read_bytes(), inside.read_bytes())
-        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
+        if os.name != 'nt':
+            self.assertEqual(snapshot.stat().st_mode & 0o777, 0o600)
         self.assertEqual(manifest["counts"]["excluded_by_reason"],
                          {"no_conversation_records": 1, "outside_workspace": 1, "subagent": 3})
 
