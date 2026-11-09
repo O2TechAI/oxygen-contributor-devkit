@@ -35,7 +35,7 @@ class CollectWorkspaceSessionsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.workspace = self.root / "workspace with spaces"
         self.workspace.mkdir()
         self.home = self.root / "codex"

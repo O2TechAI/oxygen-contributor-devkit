@@ -52,7 +52,7 @@ class CrossSessionLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.inputs = self.root / "exports"
         self.run = self.root / "run"
         # Worker choices from the developer's own environment must not change the defaults.

@@ -48,7 +48,7 @@ class TrajectoryAgentsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.categories = self.root / "insight_categories.md"
         self.categories.write_bytes(RUN.CATEGORY_REFERENCE.read_bytes())
         category_patch = patch.object(RUN, "CATEGORY_REFERENCE", self.categories)
